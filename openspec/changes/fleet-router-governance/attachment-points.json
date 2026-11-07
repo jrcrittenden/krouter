@@ -1,0 +1,531 @@
+{
+  "schemaVersion": 1,
+  "status": "proposed-not-installed",
+  "hostContractVersion": "1 (proposed)",
+  "inspectedCommit": "325190b",
+  "inspectedDate": "2026-10-31",
+  "coverageRule": "Only behaviorally verified ingress/provider/transport/payload combinations may be enabled for governed execution.",
+  "attachments": [
+    {
+      "id": "H01",
+      "name": "readiness",
+      "state": "planned",
+      "sourceFiles": [
+        "src/shared/services/bootstrap.js",
+        "src/shared/services/initializeApp.js",
+        "src/app/layout.js"
+      ],
+      "sourceSymbols": [
+        "initializeApp"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/token-warmer-refresh.test.js"
+      ],
+      "requiredConformanceCases": [
+        "LIFE-01 api-first readiness",
+        "LIFE-02 failed/incompatible required plugin",
+        "LIFE-03 concurrent initialization and recovery",
+        "LIFE-04 stop admission before shutdown"
+      ],
+      "notes": "Existing root-layout bootstrap is not the mandatory readiness boundary."
+    },
+    {
+      "id": "H02",
+      "name": "trusted-ingress",
+      "state": "planned",
+      "sourceFiles": [
+        "src/proxy.js",
+        "src/dashboardGuard.js",
+        "next.config.mjs",
+        "src/app/api/v1/chat/completions/route.js",
+        "src/app/api/v1/responses/route.js",
+        "src/app/api/v1/messages/route.js",
+        "src/app/api/v1/responses/compact/route.js",
+        "src/app/api/v1/api/chat/route.js",
+        "src/app/api/v1beta/models/[...path]/route.js"
+      ],
+      "sourceSymbols": [
+        "POST",
+        "proxy"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/rewrite-prefix-coverage.test.js"
+      ],
+      "requiredConformanceCases": [
+        "ING-01 all aliases/protocols authenticate",
+        "ING-02 spoofed internal principal rejected",
+        "ING-03 parallel principal context isolation"
+      ],
+      "notes": "Resolve fleet scope in the handler runtime; do not rely on Proxy globals."
+    },
+    {
+      "id": "H03",
+      "name": "preprocessing",
+      "state": "planned",
+      "sourceFiles": [
+        "src/middleware/redaction/middleware.js",
+        "src/app/api/v1beta/models/[...path]/route.js",
+        "src/app/api/v1/responses/compact/route.js",
+        "src/app/api/v1/api/chat/route.js"
+      ],
+      "sourceSymbols": [
+        "withRedaction",
+        "createRedactionMiddleware"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/presidio-coverage.test.js",
+        "tests/unit/presidio-v1beta-failclosed.test.js",
+        "tests/unit/presidio-settings-cache.test.js"
+      ],
+      "requiredConformanceCases": [
+        "PROC-01 no sidecar call before permission",
+        "PROC-02 original intent and abort survive conversion",
+        "PROC-03 fail-closed failure mapping"
+      ],
+      "notes": "Existing redaction options allow explicit fail-open; governed policy must prohibit that when redaction is required."
+    },
+    {
+      "id": "H04",
+      "name": "analysis-cache-synthetic",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/chat.js",
+        "open-sse/services/responseCache.js",
+        "open-sse/services/intentClassifier.js",
+        "open-sse/services/complexityRouter.js"
+      ],
+      "sourceSymbols": [
+        "handleChat",
+        "lookupCache",
+        "saveToCache"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/response-cache.test.js",
+        "tests/unit/response-cache-guards.test.js"
+      ],
+      "requiredConformanceCases": [
+        "EARLY-01 no classifier without permission",
+        "EARLY-02 scoped actual-model/E2EE provenance",
+        "EARLY-03 synthetic response policy checked"
+      ],
+      "notes": "Cache and bypass responses precede executor calls."
+    },
+    {
+      "id": "H05",
+      "name": "canonical-model-resolution",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/services/model.js",
+        "open-sse/services/model.js",
+        "src/lib/db/repos/aliasRepo.js",
+        "src/lib/db/repos/combosRepo.js",
+        "open-sse/config/providerModels.js",
+        "open-sse/providers/capabilities.js"
+      ],
+      "sourceSymbols": [
+        "getModelInfo"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/compatible-provider-connections.test.js"
+      ],
+      "requiredConformanceCases": [
+        "IDENT-01 ambiguous identity rejected",
+        "IDENT-02 aliases preserve original hard constraint",
+        "IDENT-03 registry version/equivalence update"
+      ],
+      "notes": "Catalog display names are not a canonical family/equivalence authority."
+    },
+    {
+      "id": "H06",
+      "name": "candidate-routing",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/chat.js",
+        "open-sse/services/combo.js",
+        "open-sse/services/capacityAdapter.js",
+        "open-sse/services/emergencyFallback.js"
+      ],
+      "sourceSymbols": [
+        "handleSingleModelChat",
+        "handleComboChat",
+        "augmentModelsWithCapacityAdapter"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/combo-routing.test.js",
+        "tests/unit/capacity-adapter.test.js",
+        "tests/unit/emergency-fallback.test.js",
+        "tests/unit/emergency-fallback-wiring.test.js"
+      ],
+      "requiredConformanceCases": [
+        "ROUTE-01 nested combo/adapter cannot expand family",
+        "ROUTE-02 emergency exact-model rejection",
+        "ROUTE-03 unchanged permitted strategy"
+      ],
+      "notes": "Emergency wiring test is helper-level, not actual handler enforcement."
+    },
+    {
+      "id": "H07",
+      "name": "fusion-children",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/services/combo.js",
+        "src/sse/handlers/chat.js"
+      ],
+      "sourceSymbols": [
+        "handleFusionChat",
+        "collectPanel"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/combo-routing.test.js"
+      ],
+      "requiredConformanceCases": [
+        "FUSION-01 trusted panel/judge roles",
+        "FUSION-02 child funding and policy",
+        "FUSION-03 straggler timeout retains exposure"
+      ],
+      "notes": "Baseline combo tests are not proof of fusion lifecycle coverage."
+    },
+    {
+      "id": "H08",
+      "name": "account-credential-selection",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/services/auth.js",
+        "src/sse/services/tokenRefresh.js",
+        "open-sse/services/quotaPreflight.js",
+        "open-sse/services/oauthCredentialManager.js"
+      ],
+      "sourceSymbols": [
+        "getProviderCredentials",
+        "isAccountAboveThreshold"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/quota-preflight.test.js",
+        "tests/unit/strict-proxy-reaches-executor-proxy-options.test.js"
+      ],
+      "requiredConformanceCases": [
+        "ACCOUNT-01 account/key policy intersection",
+        "ACCOUNT-02 cold cache never bypasses funding",
+        "ACCOUNT-03 refreshed identity revalidated"
+      ],
+      "notes": "Quota preflight is advisory and currently permits unknown quota."
+    },
+    {
+      "id": "H09",
+      "name": "translation-transform-diagnostics",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/handlers/chatCore.js",
+        "open-sse/utils/requestLogger.js",
+        "src/lib/db/repos/requestDetailsRepo.js"
+      ],
+      "sourceSymbols": [
+        "handleChatCore",
+        "createRequestLogger"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/forced-stream-client-shapes.test.js"
+      ],
+      "requiredConformanceCases": [
+        "PROC-04 no unauthorized classifier/sidecar/log sink",
+        "PROC-05 translation before E2EE encryption",
+        "PROC-06 final payload priced after permitted transformations"
+      ],
+      "notes": "Request logger and request-detail persistence are distinct content sinks."
+    },
+    {
+      "id": "H10",
+      "name": "chat-executor-entry",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/handlers/chatCore.js",
+        "src/sse/handlers/chat.js",
+        "open-sse/executors/index.js"
+      ],
+      "sourceSymbols": [
+        "handleChatCore",
+        "getExecutor"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/strict-proxy-reaches-executor-proxy-options.test.js"
+      ],
+      "requiredConformanceCases": [
+        "ATTEMPT-01 distinct initial/refresh/emergency attempt",
+        "ATTEMPT-02 tightening during refresh blocks send"
+      ],
+      "notes": "Outer execute is a logical operation boundary, not one actual transmission."
+    },
+    {
+      "id": "H11",
+      "name": "base-executor-transmissions",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/executors/base.js",
+        "open-sse/services/apiKeyRotator.js"
+      ],
+      "sourceSymbols": [
+        "BaseExecutor.execute"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/model-strip-reactive-retry.test.js"
+      ],
+      "requiredConformanceCases": [
+        "SEND-01 per-send admission for retries/base URLs",
+        "SEND-02 repair payload invalidates old permit",
+        "SEND-03 rotated effective key bound"
+      ],
+      "notes": "Includes extra-key rotation and tool/image/field repair transmissions."
+    },
+    {
+      "id": "H12",
+      "name": "specialized-and-network-transports",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/executors/antigravity.js",
+        "open-sse/executors/cursor.js",
+        "open-sse/executors/qoder.js",
+        "open-sse/executors/kiro.js",
+        "open-sse/executors/mimo-free.js",
+        "open-sse/executors/grok-web.js",
+        "open-sse/executors/perplexity-web.js",
+        "open-sse/executors/vertex.js",
+        "open-sse/utils/proxyFetch.js"
+      ],
+      "sourceSymbols": [
+        "proxyAwareFetch",
+        "CursorExecutor",
+        "QoderExecutor",
+        "KiroExecutor"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/antigravity-long-retry.test.js",
+        "tests/unit/antigravity-fast-fail-retry.test.js",
+        "tests/unit/kiro-repair-retry-no-top-level-system-prompt.test.js",
+        "tests/unit/kiro-terminal-integrity.test.js"
+      ],
+      "requiredConformanceCases": [
+        "SEND-04 H2/direct fetch obey permit",
+        "SEND-05 proxy relay and redirects destination-bound",
+        "SEND-06 Kiro/MiMo/Antigravity retry requires new admission",
+        "CRYPTO-01 verified bytes only"
+      ],
+      "notes": "Migrate concrete sends, not just subclasses that delegate to BaseExecutor."
+    },
+    {
+      "id": "H13",
+      "name": "completion-and-settlement",
+      "state": "planned",
+      "sourceFiles": [
+        "open-sse/handlers/chatCore/streamingHandler.js",
+        "open-sse/handlers/chatCore/nonStreamingHandler.js",
+        "open-sse/handlers/chatCore/sseToJsonHandler.js",
+        "open-sse/handlers/chatCore/requestDetail.js",
+        "open-sse/utils/stream.js",
+        "open-sse/utils/streamHandler.js",
+        "open-sse/utils/usageTracking.js"
+      ],
+      "sourceSymbols": [
+        "handleStreamingResponse",
+        "buildOnStreamComplete",
+        "handleNonStreamingResponse",
+        "handleForcedSSEToJson"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/responses-abort-terminal.test.js",
+        "tests/unit/stream-abort-reports-error-in-band.test.js",
+        "tests/unit/forced-stream-client-shapes.test.js"
+      ],
+      "requiredConformanceCases": [
+        "DONE-01 JSON/SSE/forced-SSE once-only settlement",
+        "DONE-02 disconnect/error/terminal race",
+        "DONE-03 preserve uncertain exposure",
+        "DONE-04 raw usage separate from client buffers"
+      ],
+      "notes": "onRequestSuccess reports account health before a streaming completion finishes."
+    },
+    {
+      "id": "H14",
+      "name": "embeddings",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/embeddings.js",
+        "open-sse/handlers/embeddingsCore.js"
+      ],
+      "sourceSymbols": [
+        "handleEmbeddings",
+        "handleEmbeddingsCore"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/embeddingsCore.test.js"
+      ],
+      "requiredConformanceCases": [
+        "MEDIA-01 embeddings initial/refresh admission",
+        "MEDIA-02 unsupported E2EE zero send"
+      ],
+      "notes": "Embeddings has direct fetch and a credential-refresh retry."
+    },
+    {
+      "id": "H15",
+      "name": "image-audio",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/imageGeneration.js",
+        "src/sse/handlers/stt.js",
+        "src/sse/handlers/tts.js",
+        "open-sse/handlers/imageGenerationCore.js",
+        "open-sse/handlers/sttCore.js",
+        "open-sse/handlers/ttsCore.js",
+        "open-sse/handlers/ttsProviders/index.js",
+        "open-sse/handlers/imageProviders/index.js"
+      ],
+      "sourceSymbols": [
+        "handleImageGenerationCore",
+        "handleSttCore",
+        "handleTtsCore"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/image-generation.test.js"
+      ],
+      "requiredConformanceCases": [
+        "MEDIA-03 no-auth/local branches governed",
+        "MEDIA-04 STT upload/submit/poll context",
+        "MEDIA-05 TTS adapters and image asset downloads",
+        "MEDIA-06 native-unit conservative price bounds"
+      ],
+      "notes": "Provider adapter families need per-adapter coverage before allowlisting."
+    },
+    {
+      "id": "H16",
+      "name": "video-jobs",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/videoGeneration.js",
+        "open-sse/handlers/videoCore.js"
+      ],
+      "sourceSymbols": [
+        "handleVideoCreate",
+        "handleVideoGet",
+        "handleVideoProxyCore"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/xai-video-core.test.js",
+        "tests/unit/xai-video-handler.test.js"
+      ],
+      "requiredConformanceCases": [
+        "JOB-01 job principal ownership and status",
+        "JOB-02 uncertain creation not blindly replayed",
+        "JOB-03 refresh re-admission and durable exposure"
+      ],
+      "notes": "Async creation/status cannot be settled like a synchronous chat response."
+    },
+    {
+      "id": "H17",
+      "name": "search-and-fetch",
+      "state": "planned",
+      "sourceFiles": [
+        "src/sse/handlers/search.js",
+        "src/sse/handlers/fetch.js",
+        "open-sse/handlers/search/index.js",
+        "open-sse/handlers/search/chatSearch.js",
+        "open-sse/handlers/fetch/index.js",
+        "src/shared/utils/ssrfGuard.js"
+      ],
+      "sourceSymbols": [
+        "handleSearchCore",
+        "handleChatSearch",
+        "handleFetchCore",
+        "fetchPublic"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/search-lock-scope.test.js",
+        "tests/unit/web-fetch-lock-scope.test.js"
+      ],
+      "requiredConformanceCases": [
+        "WEB-01 dedicated/chat/fetch destination policy",
+        "WEB-02 SSRF still denies prohibited network",
+        "WEB-03 each billable retry admitted"
+      ],
+      "notes": "Lock-scope tests partly check source; no fleet enforcement proven."
+    },
+    {
+      "id": "H18",
+      "name": "system-and-admin-probes",
+      "state": "planned",
+      "sourceFiles": [
+        "src/shared/services/quotaAutoPing.js",
+        "src/shared/services/tokenWarmer.js",
+        "src/app/api/providers/validate/route.js",
+        "src/app/api/models/test/ping.js",
+        "src/app/api/providers/[id]/test-models/route.js"
+      ],
+      "sourceSymbols": [
+        "sendClaudePing",
+        "sendCodexPing",
+        "pingModelByKind"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/quota-auto-ping-config.test.js",
+        "tests/unit/token-warmer-refresh.test.js",
+        "tests/unit/provider-validation.test.js"
+      ],
+      "requiredConformanceCases": [
+        "SYSTEM-01 synthetic system principal/budget",
+        "SYSTEM-02 self-HTTP no duplicate reservation",
+        "SYSTEM-03 credential/catalog traffic distinct from inference"
+      ],
+      "notes": "Auto-ping config test does not exercise inference lifecycle."
+    },
+    {
+      "id": "H19",
+      "name": "durable-state-and-input-ports",
+      "state": "planned",
+      "sourceFiles": [
+        "src/lib/db/driver.js",
+        "src/lib/db/migrate.js",
+        "src/lib/db/schema.js",
+        "src/lib/db/adapters/sqljsAdapter.js",
+        "src/lib/db/repos/usageRepo.js",
+        "src/lib/db/repos/pricingRepo.js",
+        "open-sse/services/sessionManager.js",
+        "open-sse/utils/sessionManager.js",
+        "open-sse/utils/usageTracking.js"
+      ],
+      "sourceSymbols": [
+        "getAdapter",
+        "logUsage"
+      ],
+      "existingRegressionFiles": [
+        "tests/unit/usage-api-key-attribution.test.js",
+        "tests/unit/session-management.test.js"
+      ],
+      "requiredConformanceCases": [
+        "STATE-01 actual durable concurrency/crash tests",
+        "STATE-02 session principal/restart isolation",
+        "STATE-03 reject unsupported hard-cap durability"
+      ],
+      "notes": "Existing estimated usage and sql.js file persistence are not a hard-spend ledger."
+    },
+    {
+      "id": "H20",
+      "name": "management-and-process-boundaries",
+      "state": "planned",
+      "sourceFiles": [
+        "src/dashboardGuard.js",
+        "src/app/api/settings/route.js",
+        "src/app/api/cache/route.js",
+        "src/mitm/server.js",
+        "src/mitm/handlers/base.js"
+      ],
+      "sourceSymbols": [
+        "fetchRouter"
+      ],
+      "existingRegressionFiles": [],
+      "requiredConformanceCases": [
+        "ADMIN-01 plugin management authorization and audit",
+        "PROCESS-01 routed MITM authenticates at ingress",
+        "PROCESS-02 uncovered direct passthrough unavailable for governed traffic"
+      ],
+      "notes": "MITM direct H2/HTTPS passthrough is outside the same-process plugin guarantee."
+    }
+  ]
+}

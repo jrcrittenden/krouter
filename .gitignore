@@ -52,6 +52,9 @@ source/*
 docs/*
 !docs/ARCHITECTURE.md
 !docs/REDACTION_SETUP.md
+!docs/FLEET_ROUTER_DESIGN.md
+!docs/FLEET_PLUGIN_ARCHITECTURE.md
+!docs/FLEET_PLUGIN_MAINTENANCE.md
 test/*
 open-sse/test/*
 RM.vn.md

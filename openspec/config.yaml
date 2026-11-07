@@ -1,0 +1,10 @@
+schema: spec-driven
+context: |
+  kRouter 0.5.166: Next.js 16.3.8, React 19, JavaScript, open-sse provider execution,
+  SQLite adapters with sql.js fallback, standalone custom server on port 20128.
+  Read AGENTS.md and local Next.js documentation before application code changes.
+  Existing fleet design: docs/FLEET_ROUTER_DESIGN.md.
+  Specs under openspec/specs are source-inspected baseline contracts; they are
+  not evidence of passing tests. New fleet guarantees remain proposed until implemented.
+  Preserve permitted protocols, translation, account rotation and fallback.
+  Governance, explicit model intent, privacy and funding constraints must survive every attempt.
