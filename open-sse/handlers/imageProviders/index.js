@@ -13,6 +13,7 @@ import runwayml from "./runwayml.js";
 import cloudflareAi from "./cloudflareAi.js";
 // 0.5.107 — Antigravity native image generation (delegates to the executor).
 import antigravity from "./antigravity.js";
+import venice from "./venice.js";
 
 const ADAPTERS = {
   openai: createOpenAIAdapter("openai"),
@@ -34,6 +35,7 @@ const ADAPTERS = {
   runwayml,
   "cloudflare-ai": cloudflareAi,
   antigravity,
+  venice,
 };
 
 export function getImageAdapter(provider) {

@@ -351,6 +351,17 @@ export async function POST(request) {
           break;
         }
 
+        // Venice /models is public and answers 200 for any key, so the generic /models
+        // probe accepted junk keys. /api_keys/rate_limits authenticates (401 on a bad key).
+        case "venice": {
+          const res = await fetch("https://api.venice.ai/api/v1/api_keys/rate_limits", {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            signal: AbortSignal.timeout(8000),
+          });
+          isValid = res.ok;
+          break;
+        }
+
         case "deepseek":
         case "groq":
         case "xai":

@@ -8,6 +8,7 @@ import {
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { handleVideoProxyCore, getVideoConfig, sanitizeSecrets } from "open-sse/handlers/videoCore.js";
+import { VENICE_JOB_PREFIX } from "open-sse/handlers/veniceJobs.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
@@ -26,7 +27,15 @@ const CREATE_ROTATION_STATUSES = new Set([
   HTTP_STATUS.RATE_LIMITED,
 ]);
 
-async function requireValidApiKey(request) {
+// Statuses that describe the account (auth, balance, rate limit), not the job.
+export const ACCOUNT_LEVEL_STATUSES = new Set([
+  HTTP_STATUS.UNAUTHORIZED,
+  402,
+  HTTP_STATUS.FORBIDDEN,
+  HTTP_STATUS.RATE_LIMITED,
+]);
+
+export async function requireValidApiKey(request) {
   const apiKey = extractApiKey(request);
   const settings = await getSettings();
   if (settings.requireApiKey) {
@@ -79,7 +88,7 @@ async function resolveVideoProvider(parsedBody) {
   return { provider: modelInfo.provider, model: modelInfo.model };
 }
 
-function withConnectionHeader(response, connectionId) {
+export function withConnectionHeader(response, connectionId) {
   if (!connectionId) return response;
   const headers = new Headers(response.headers);
   // Video jobs are account-bound upstream — clients echo this back as
@@ -185,7 +194,8 @@ export async function handleVideoGet(request, requestId) {
 
   if (!requestId) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing video request id");
 
-  const provider = DEFAULT_VIDEO_PROVIDER;
+  // Venice job ids carry their provider ("venice:<model>:<queue_id>"); xAI ids are bare.
+  const provider = requestId.startsWith(VENICE_JOB_PREFIX) ? "venice" : DEFAULT_VIDEO_PROVIDER;
   const preferredConnectionId = request.headers.get("x-connection-id") || null;
 
   const credentials = await getProviderCredentials(provider, null, null, { preferredConnectionId });
@@ -216,8 +226,12 @@ export async function handleVideoGet(request, requestId) {
     return withConnectionHeader(result.response, credentials.connectionId);
   }
 
-  await markAccountUnavailable(
-    credentials.connectionId, result.status, sanitizeSecrets(result.error, refreshedCredentials), provider, null
-  );
+  // Venice polls only lock the account for account-level failures: a 404 (job expired)
+  // or an over-limit inline file says nothing about the key's health.
+  if (provider !== "venice" || ACCOUNT_LEVEL_STATUSES.has(result.status)) {
+    await markAccountUnavailable(
+      credentials.connectionId, result.status, sanitizeSecrets(result.error, refreshedCredentials), provider, null
+    );
+  }
   return result.response;
 }

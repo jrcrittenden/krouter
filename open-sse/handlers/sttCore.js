@@ -147,7 +147,9 @@ async function transcribeOpenAICompatible(cfg, file, model, token, formData) {
   const fd = new FormData();
   fd.append("file", file, file.name || "audio.wav");
   fd.append("model", model);
-  for (const k of ["language", "prompt", "response_format", "temperature"]) {
+  // sttConfig.extraFields: provider-specific form fields forwarded only when the
+  // client sends them (Venice: "timestamps" for word/segment timings).
+  for (const k of ["language", "prompt", "response_format", "temperature", ...(cfg.extraFields || [])]) {
     const v = formData.get(k);
     if (v !== null && v !== undefined && v !== "") fd.append(k, v);
   }

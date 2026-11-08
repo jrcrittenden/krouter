@@ -1,6 +1,8 @@
+import { Buffer } from "node:buffer";
 import { createErrorResult } from "../utils/error.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { refreshTokenByProvider } from "../services/tokenRefresh.js";
+import { veniceQueue, veniceRetrieve, buildVideoQueueBody } from "./veniceJobs.js";
 
 // 0.5.111 (upstream d6761c6f) — video endpoints per provider.
 //
@@ -12,6 +14,9 @@ const VIDEO_CONFIG = {
   // Async video jobs: POST returns { request_id }, GET /{id} polls to done/failed.
   // Docs: https://docs.x.ai/developers/rest-api-reference/inference/videos
   xai: { baseUrl: "https://api.x.ai/v1/videos" },
+  // Venice: queue/retrieve job API, translated to the xAI contract in ./veniceJobs.js.
+  // Job ids are "venice:<model>:<queue_id>" so the poll route can find the provider.
+  venice: { baseUrl: "https://api.venice.ai/api/v1/video", jobs: "venice" },
 };
 
 // Upstream fetch deadline for video job submission/polling (the job itself is
@@ -103,6 +108,18 @@ export async function handleVideoProxyCore({
   }
   if (!requestId && !VIDEO_ACTIONS.has(action)) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Unknown video action: ${action}`);
+  }
+
+  if (config.jobs === "venice") {
+    if (requestId) return veniceRetrieve({ kind: "video", jobId: requestId, credentials, signal });
+    let parsed;
+    try {
+      parsed = JSON.parse(Buffer.isBuffer(rawBody) ? rawBody.toString("utf8") : String(rawBody ?? ""));
+    } catch {
+      return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${provider}] video requests must be JSON (image/video inputs go in image_url / video_url)`);
+    }
+    if (!parsed?.model) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${provider}] missing model`);
+    return veniceQueue({ kind: "video", model: parsed.model, queueBody: buildVideoQueueBody(parsed.model, parsed), credentials, signal });
   }
 
   const method = requestId ? "GET" : "POST";

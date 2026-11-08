@@ -16,6 +16,8 @@ const ENDPOINTS = {
   nvidia: "https://integrate.api.nvidia.com/v1/embeddings",
   "jina-ai": "https://api.jina.ai/v1/embeddings",
   "vercel-ai-gateway": "https://ai-gateway.vercel.sh/v1/embeddings",
+  // Venice rejects token-id arrays (400); strings and string arrays only.
+  venice: "https://api.venice.ai/api/v1/embeddings",
 };
 
 export default function createOpenAIEmbeddingAdapter(providerId) {

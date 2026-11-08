@@ -354,7 +354,29 @@ function buildSearxngRequest(config, params) {
 
 // ── Dispatcher ──────────────────────────────────────────────────────────
 
+// Venice /augment/search ($0.01/request). search_provider picks the backend:
+// brave (default), google (proxied) or exa. The client baseUrl override is ignored:
+// it would send the Venice bearer key to whatever host the caller named.
+const VENICE_SEARCH_PROVIDERS = new Set(["brave", "google", "exa"]);
+function buildVeniceRequest(config, params) {
+  const body = { query: params.query.slice(0, 400), limit: Math.max(1, Math.min(20, params.maxResults || 10)) };
+  const backend = getProviderSetting(params, "search_provider");
+  if (backend !== undefined && backend !== null && backend !== "") {
+    if (!VENICE_SEARCH_PROVIDERS.has(backend)) throw new Error("venice search_provider must be brave, google or exa");
+    body.search_provider = backend;
+  }
+  return {
+    url: config.baseUrl,
+    init: {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${params.token}` },
+      body: JSON.stringify(body),
+    },
+  };
+}
+
 const BUILDERS = {
+  "venice": buildVeniceRequest,
   "serper": buildSerperRequest,
   "brave-search": buildBraveRequest,
   "perplexity": buildPerplexityRequest,
