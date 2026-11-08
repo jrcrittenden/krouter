@@ -45,3 +45,30 @@ Restart without rebuilding:
 ```bash
 sudo launchctl kickstart -k system/com.kodelyth.krouter
 ```
+
+## Headroom compression proxy (optional)
+
+The Token Saver's Headroom option sends each conversation to a local
+[Headroom](https://github.com/headroomlabs-ai/headroom) proxy's `/v1/compress`
+endpoint before dispatch, and fails open if the proxy is down. Run it as its own
+daemon instead of a dashboard-spawned child, so it survives kRouter restarts:
+
+```bash
+sudo bash /opt/services/krouter/deploy/launchd/install-headroom.sh
+```
+
+This creates a venv at `/opt/services/headroom/venv` (Homebrew Python 3.12)
+and installs `headroom-ai[proxy,code]`. It then runs `headroom proxy` on
+`127.0.0.1:8787` as `svc-krouter`, with Headroom's usage telemetry turned off.
+Re-run the script to upgrade. Set `HEADROOM_EXTRAS=proxy,code,ml` to add the
+Kompress ML model, which pulls in torch. Logs are in
+`/opt/services/headroom/logs/`.
+
+Then go to Dashboard → Token Saver, turn on Headroom, and leave the URL as
+`http://localhost:8787`. Do not use the card's Start/Stop buttons. They manage
+a separate child process and would conflict with the daemon on the same port.
+
+```bash
+sudo launchctl kickstart -k system/com.kodelyth.headroom   # restart
+curl -s http://127.0.0.1:8787/health                       # health
+```

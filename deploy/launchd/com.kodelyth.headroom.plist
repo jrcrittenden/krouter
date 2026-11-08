@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.kodelyth.headroom</string>
+  <key>UserName</key><string>svc-krouter</string>
+  <key>GroupName</key><string>SDS</string>
+  <key>WorkingDirectory</key><string>/opt/services/headroom</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/services/headroom/venv/bin/headroom</string>
+    <string>proxy</string>
+    <string>--host</string><string>127.0.0.1</string>
+    <string>--port</string><string>8787</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>/opt/services/headroom/home</string>
+    <key>PATH</key><string>/opt/services/headroom/venv/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Headroom's anonymous usage beacon is on by default; keep it off. -->
+    <key>HEADROOM_TELEMETRY</key><string>off</string>
+    <key>HEADROOM_BEACON</key><string>off</string>
+    <key>DO_NOT_TRACK</key><string>1</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>StandardOutPath</key><string>/opt/services/headroom/logs/service.log</string>
+  <key>StandardErrorPath</key><string>/opt/services/headroom/logs/service.error.log</string>
+</dict>
+</plist>
