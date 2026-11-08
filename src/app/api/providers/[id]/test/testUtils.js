@@ -581,6 +581,11 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
         const res = await fetchWithConnectionProxy("https://api.siliconflow.com/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };
       }
+      // Venice /models is public (200 for any key), so probe an endpoint that checks the key.
+      case "venice": {
+        const res = await fetchWithConnectionProxy("https://api.venice.ai/api/v1/api_keys/rate_limits", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
+        return { valid: res.ok, error: res.ok ? null : (res.status === 401 || res.status === 403 ? "Invalid API key" : `Venice returned ${res.status}`) };
+      }
       case "hyperbolic": {
         const res = await fetchWithConnectionProxy("https://api.hyperbolic.xyz/v1/models", { headers: { Authorization: `Bearer ${connection.apiKey}` } }, effectiveProxy);
         return { valid: res.ok, error: res.ok ? null : "Invalid API key" };

@@ -62,7 +62,7 @@ export async function handleImageGenerationCore({
       log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
       const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
       if (onRequestSuccess) await onRequestSuccess();
-      const normalized = adapter.normalize(responseBody, body.prompt);
+      const normalized = adapter.normalize(responseBody, body.prompt, body);
       const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : responseBody;
 
       if (binaryOutput) {
@@ -202,7 +202,7 @@ export async function handleImageGenerationCore({
   if (onRequestSuccess) await onRequestSuccess();
 
   // Normalize → OpenAI-compatible shape
-  const normalized = adapter.normalize(parsed, body.prompt);
+  const normalized = adapter.normalize(parsed, body.prompt, body);
 
   // Already in OpenAI shape? skip re-normalize
   const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : parsed;

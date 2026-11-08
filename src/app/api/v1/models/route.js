@@ -97,6 +97,7 @@ const MODEL_TYPE_TO_KIND = {
   stt: "stt",
   imageToText: "imageToText",
   video: "video",
+  music: "music",
 };
 
 function modelKind(model) {

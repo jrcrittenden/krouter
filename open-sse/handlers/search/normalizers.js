@@ -90,6 +90,17 @@ function normalizeExa(data, _query, _searchType) {
   return { results, totalResults: results.length };
 }
 
+// Venice /augment/search: { query, results: [{ title, url, content, date }] }
+function normalizeVenice(data, _query, _searchType) {
+  const now = new Date().toISOString();
+  const items = data.results;
+  if (!Array.isArray(items)) return { results: [], totalResults: null };
+  const results = items.map((item, idx) =>
+    makeResult("venice", { title: item.title, url: item.url, snippet: item.content || "", published_at: item.date || null }, idx, now)
+  );
+  return { results, totalResults: results.length };
+}
+
 function normalizeTavily(data, _query, _searchType) {
   const now = new Date().toISOString();
   const items = data.results;
@@ -211,6 +222,7 @@ const NORMALIZERS = {
   "searchapi": normalizeSearchApi,
   "youcom": normalizeYouCom,
   "searxng": normalizeSearxng,
+  "venice": normalizeVenice,
 };
 
 /**

@@ -1,5 +1,9 @@
 import { PROVIDERS } from "./providers.js";
 import { buildTtsProviderModels } from "./ttsModels.js";
+import {
+  VENICE_EMBEDDING_MODELS, VENICE_TTS_MODELS, VENICE_STT_MODELS,
+  VENICE_IMAGE_MODELS, VENICE_VIDEO_MODELS, VENICE_MUSIC_MODELS,
+} from "./veniceModels.js";
 
 // Provider models - Single source of truth
 // Key = alias (cc, cx, gc, qw, if, ag, gh for OAuth; id for API Key)
@@ -744,6 +748,18 @@ export const PROVIDER_MODELS = {
     { id: "voyage-finance-2", name: "Voyage Finance 2", type: "embedding" },
     { id: "voyage-law-2", name: "Voyage Law 2", type: "embedding" },
     { id: "voyage-multilingual-2", name: "Voyage Multilingual 2", type: "embedding" },
+  ],
+  // Venice media models, generated from Venice's public catalog (scripts/sync-venice-models.mjs).
+  // Chat models are not listed: Venice is passthroughModels and the dashboard reads
+  // them live. Edit/upscale models are operation models for /v1/images/edits and
+  // /v1/images/upscale, not image generators, so they stay out of the image kind.
+  venice: [
+    ...VENICE_EMBEDDING_MODELS.map(({ id, name }) => ({ id, name, type: "embedding" })),
+    ...VENICE_TTS_MODELS.map(({ id, name }) => ({ id, name, type: "tts" })),
+    ...VENICE_STT_MODELS.map(({ id, name }) => ({ id, name, type: "stt", params: ["language", "response_format", "timestamps"] })),
+    ...VENICE_IMAGE_MODELS.filter((m) => !m.deprecated).map(({ id, name }) => ({ id, name, type: "image", capabilities: ["text2img"], params: ["size", "n", "output_format", "negative_prompt", "aspect_ratio", "resolution", "quality", "seed", "style_preset", "safe_mode"] })),
+    ...VENICE_VIDEO_MODELS.filter((m) => !m.deprecated).map(({ id, name, modelType }) => ({ id, name, type: "video", ...(modelType ? { capabilities: [modelType] } : {}) })),
+    ...VENICE_MUSIC_MODELS.map(({ id, name }) => ({ id, name, type: "music" })),
   ],
   siliconflow: [
     // DeepSeek models

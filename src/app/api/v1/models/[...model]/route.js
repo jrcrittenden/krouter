@@ -11,6 +11,8 @@ const KIND_SLUG_MAP = {
   "stt": ["stt"],
   "embedding": ["embedding"],
   "image-to-text": ["imageToText"],
+  // Venice music / sound-effect models (POST /v1/audio/generations).
+  "music": ["music"],
   "web": ["webSearch", "webFetch"],
 };
 

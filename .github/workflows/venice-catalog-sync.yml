@@ -1,0 +1,92 @@
+name: Venice catalog sync
+
+# Venice adds media models every few weeks. This regenerates
+# open-sse/config/veniceModels.js from Venice's public catalog (no API key) and
+# opens a PR when the model lists changed. A quiet week produces no diff and no PR.
+#
+# PRs opened with GITHUB_TOKEN do not trigger other workflows, so ci.yml will not
+# run on the PR by itself: the test suite runs here, before the PR is opened.
+#
+# The sync script refuses to write if a model type comes back empty or shrinks by
+# more than half (a degraded catalog response). That fails this run, and GitHub
+# emails the repo owner; rerun the script locally with --force if Venice really
+# retired the models.
+#
+# Needs the repo setting "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  schedule:
+    - cron: "17 9 * * 0" # Sundays 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: venice-catalog-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    # Only on the fork that owns this automation, not on forks of it.
+    if: github.repository == 'jrcrittenden/krouter'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BRANCH: automation/venice-catalog
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Regenerate the Venice catalog
+        run: node scripts/sync-venice-models.mjs
+
+      - name: Detect changes
+        id: diff
+        run: |
+          if git diff --quiet -- open-sse/config/veniceModels.js; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Venice catalog unchanged."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- open-sse/config/veniceModels.js
+          fi
+
+      - name: Install
+        if: steps.diff.outputs.changed == 'true'
+        run: npm ci
+
+      - name: Test against the new catalog
+        if: steps.diff.outputs.changed == 'true'
+        run: npm test
+
+      - name: Open or update the PR
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C "$BRANCH"
+          git add open-sse/config/veniceModels.js
+          git commit -m "chore(venice): sync model catalog $(date -u +%F)"
+          git push --force origin "$BRANCH"
+
+          summary=$(git diff --stat HEAD~1 -- open-sse/config/veniceModels.js | tail -1)
+          body=$(printf '%s\n\n%s\n\n%s' \
+            "Weekly regeneration of \`open-sse/config/veniceModels.js\` from Venice's public catalog." \
+            "Diff: ${summary}" \
+            "The test suite passed in the sync run. CI does not start on its own for bot-opened PRs; push an empty commit or re-run CI manually if you want it.")
+
+          existing=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh pr edit "$existing" --body "$body"
+            echo "Updated PR #$existing"
+          else
+            gh pr create --base main --head "$BRANCH" --title "chore(venice): sync model catalog" --body "$body"
+          fi
