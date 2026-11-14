@@ -11,6 +11,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { Card, Button } from "@/shared/components";
+import Icon from "../../../../shared/components/icons/Icon";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(2)}M`;
@@ -102,10 +103,10 @@ export default function PxpipeClient() {
           : "Stopped";
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">image</span>
+        <h2 className="section-title flex items-center gap-2">
+          <Icon name="image" size={24} className="text-primary" />
           PXPIPE Dashboard
         </h2>
         <div className="flex items-center gap-2">
@@ -134,8 +135,8 @@ export default function PxpipeClient() {
 
       <Card className="p-4">
         <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-          <h3 className="font-medium">Token savings (estimated)</h3>
-          <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1">
+          <h3 className="section-title">Token savings (estimated)</h3>
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-bg-alt p-1">
             {WINDOW_TABS.map((tab) => (
               <button
                 key={tab.id}
@@ -143,7 +144,7 @@ export default function PxpipeClient() {
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   windowId === tab.id
                     ? "bg-primary text-white shadow-sm"
-                    : "text-text-muted hover:text-text hover:bg-bg-hover"
+                    : "text-text-muted hover:text-text hover:bg-surface-2"
                 }`}
               >
                 {tab.label}
@@ -178,7 +179,7 @@ export default function PxpipeClient() {
       </Card>
 
       <Card className="p-4">
-        <h3 className="font-medium mb-3">Tokens saved — last 30 days</h3>
+        <h3 className="section-title mb-3">Tokens saved — last 30 days</h3>
         {stats?.timeline?.some((d) => d.tokensSavedEst > 0) ? (
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={stats.timeline} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -203,44 +204,44 @@ export default function PxpipeClient() {
       </Card>
 
       <Card className="p-4">
-        <h3 className="font-medium mb-3">History</h3>
+        <h3 className="section-title mb-3">History</h3>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="data-table">
             <thead>
               <tr className="text-left text-xs text-text-muted border-b border-border">
-                <th className="py-2 pr-3">Time</th>
-                <th className="py-2 pr-3">Model</th>
-                <th className="py-2 pr-3 text-right">Original</th>
-                <th className="py-2 pr-3 text-right">Compressed</th>
-                <th className="py-2 pr-3 text-right">Saved</th>
-                <th className="py-2 pr-3 text-right">%</th>
-                <th className="py-2 pr-3 text-right">Duration</th>
-                <th className="py-2">Status</th>
+                <th>Time</th>
+                <th>Model</th>
+                <th className="num">Original</th>
+                <th className="num">Compressed</th>
+                <th className="num">Saved</th>
+                <th className="num">%</th>
+                <th className="num">Duration</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {(stats?.recent || []).slice(0, 50).map((ev, i) => (
                 <tr key={`${ev.ts}-${i}`} className="border-b border-border/50">
-                  <td className="py-1.5 pr-3 whitespace-nowrap text-text-muted">
+                  <td className="whitespace-nowrap text-text-muted">
                     {new Date(ev.ts).toLocaleString()}
                   </td>
-                  <td className="py-1.5 pr-3 font-mono text-xs">{ev.provider ? `${ev.provider}/${ev.model}` : ev.model || "—"}</td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
+                  <td className="font-mono">{ev.provider ? `${ev.provider}/${ev.model}` : ev.model || "—"}</td>
+                  <td className="num font-mono">
                     {ev.applied ? fmtTokens(ev.tokensBeforeEst) : "—"}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
+                  <td className="num font-mono">
                     {ev.applied ? fmtTokens(ev.tokensAfterEst) : "—"}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs text-success">
+                  <td className="num font-mono text-success">
                     {ev.applied ? fmtTokens(ev.tokensSavedEst) : "—"}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
+                  <td className="num font-mono">
                     {ev.applied ? `${ev.savedPct}%` : "—"}
                   </td>
-                  <td className="py-1.5 pr-3 text-right font-mono text-xs">
+                  <td className="num font-mono">
                     {ev.durationMs != null ? `${ev.durationMs}ms` : "—"}
                   </td>
-                  <td className="py-1.5">
+                  <td>
                     <span
                       className={`text-xs px-2 py-0.5 rounded ${
                         ev.applied
@@ -257,10 +258,8 @@ export default function PxpipeClient() {
                 </tr>
               ))}
               {(!stats?.recent || stats.recent.length === 0) && (
-                <tr>
-                  <td colSpan={8} className="py-6 text-center text-text-muted text-sm">
-                    No PXPIPE activity yet
-                  </td>
+                <tr className="data-table-empty">
+                  <td colSpan={8}>No PXPIPE activity yet</td>
                 </tr>
               )}
             </tbody>
@@ -269,7 +268,7 @@ export default function PxpipeClient() {
       </Card>
 
       <Card className="p-4" id="logs">
-        <h3 className="font-medium mb-3">PXPIPE Logs</h3>
+        <h3 className="section-title mb-3">PXPIPE Logs</h3>
         {logs?.installLog ? (
           <pre className="rounded bg-black/5 dark:bg-white/5 p-3 text-xs font-mono overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap">
             {logs.installLog}

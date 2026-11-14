@@ -4,6 +4,7 @@ import "./registerAll.js";
 import { translateRequest } from "../../open-sse/translator/index.js";
 import { FORMATS } from "../../open-sse/translator/formats.js";
 import { AntigravityExecutor } from "../../open-sse/executors/antigravity.js";
+import { openaiToAntigravityResponse } from "../../open-sse/translator/response/openai-to-antigravity.js";
 
 const AG2O = (req) =>
   translateRequest(FORMATS.ANTIGRAVITY, FORMATS.OPENAI, "m", { request: req }, true, null, null);
@@ -82,5 +83,92 @@ describe("Antigravity executor", () => {
 
     const query = out.request.tools[0].functionDeclarations[0].parameters.properties.query;
     expect(query).toEqual({ type: "string", description: "Search query" });
+  });
+});
+
+// Gemini serialises its Schema from protobuf, so int64 keywords arrive as STRINGS
+// ("minLength": "1") and the type enum arrives UPPERCASE. Anthropic validates tool
+// schemas strictly against JSON Schema draft 2020-12 and rejects both, with
+//   tools.4.custom.input_schema: JSON schema is invalid
+// Captured from a real Antigravity chat turn (the `send_message` tool).
+describe("Antigravity tool schemas → valid JSON Schema", () => {
+  const SEND_MESSAGE = {
+    tools: [{
+      functionDeclarations: [{
+        name: "send_message",
+        description: "Send a message.",
+        parameters: {
+          type: "OBJECT",
+          properties: {
+            Message: { type: "STRING", description: "Content of the message.", minLength: "1" },
+            Recipient: { type: "STRING", description: "Conversation ID.", minLength: "1" },
+          },
+          required: ["Recipient", "Message"],
+        },
+      }],
+    }],
+    contents: [{ role: "user", parts: [{ text: "hi" }] }],
+  };
+
+  const paramsOf = (out) => out.tools[0].function.parameters;
+
+  it("lowercases the protobuf type enum", () => {
+    const p = paramsOf(AG2O(SEND_MESSAGE));
+    expect(p.type).toBe("object");
+    expect(p.properties.Message.type).toBe("string");
+  });
+
+  it("coerces string-encoded numeric keywords to numbers", () => {
+    const p = paramsOf(AG2O(SEND_MESSAGE));
+    expect(p.properties.Message.minLength, "minLength must be a number").toBe(1);
+    expect(typeof p.properties.Recipient.minLength).toBe("number");
+  });
+
+  it("normalises schemas nested in anyOf / items / $defs", () => {
+    const out = AG2O({
+      tools: [{
+        functionDeclarations: [{
+          name: "nested",
+          parameters: {
+            type: "OBJECT",
+            properties: {
+              list: { type: "ARRAY", items: { type: "STRING", minLength: "2" }, maxItems: "5" },
+              choice: { anyOf: [{ type: "STRING", minLength: "3" }, { type: "NUMBER" }] },
+            },
+          },
+        }],
+      }],
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+    });
+    const p = paramsOf(out);
+    expect(p.properties.list.items.type).toBe("string");
+    expect(p.properties.list.items.minLength).toBe(2);
+    expect(p.properties.list.maxItems).toBe(5);
+    expect(p.properties.choice.anyOf[0].type).toBe("string");
+    expect(p.properties.choice.anyOf[0].minLength).toBe(3);
+  });
+});
+
+// openai-to-antigravity.js — the accumulator stores `accum.id = tc.id` and then
+// emits { name, args } without it. Antigravity's FunctionCall carries an id, and
+// the IDE uses it to attach a command's output to the call that asked for it.
+// Without it `run_command` came back as {"output": ""} every time, and the model
+// kept retrying: "my shell commands are returning empty output".
+describe("Antigravity functionCall keeps its id", () => {
+  it("emits the OpenAI tool_call id on the functionCall part", () => {
+    const state = {};
+    const emit = (chunk) => openaiToAntigravityResponse(chunk, state);
+
+    emit({ id: "c1", model: "m", choices: [{ index: 0, delta: { tool_calls: [{
+      index: 0, id: "call_abc123", function: { name: "run_command", arguments: '{"CommandLine":' } }] } }] });
+    emit({ id: "c1", model: "m", choices: [{ index: 0, delta: { tool_calls: [{
+      index: 0, function: { arguments: '"ls -la"}' } }] } }] });
+    const out = emit({ id: "c1", model: "m", choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }] });
+
+    const call = out.response.candidates[0].content.parts.find((p) => p.functionCall)?.functionCall;
+    expect(call, "a functionCall part must be emitted").toBeTruthy();
+    expect(call.name).toBe("run_command");
+    expect(call.args).toEqual({ CommandLine: "ls -la" });
+    expect(call.id, "the IDE cannot route output without the id").toBe("call_abc123");
   });
 });

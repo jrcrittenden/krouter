@@ -1,5 +1,7 @@
 "use client";
 
+import Icon from "../../../shared/components/icons/Icon";
+
 const FORK_REPO = "https://github.com/sifxprime/krouter";
 const UPSTREAM_REPO = "https://github.com/decolua/9router";
 const NPM_PKG = "https://www.npmjs.com/package/@sifxprime/krouter";
@@ -13,7 +15,7 @@ export default function Footer() {
           <div className="col-span-2 lg:col-span-2">
             <div className="flex items-center gap-3 mb-6">
               <img src="/favicon.svg" alt="kRouter" className="size-7" />
-              <h3 className="text-white text-lg font-bold">kRouter</h3>
+              <h3 className="section-title text-white">kRouter</h3>
               <span className="text-gray-500 text-xs">by Kodelyth</span>
             </div>
             <p className="text-gray-500 text-sm max-w-xs mb-6">
@@ -21,7 +23,7 @@ export default function Footer() {
             </p>
             <div className="flex gap-4">
               <a className="text-gray-400 hover:text-white transition-colors" href={FORK_REPO} target="_blank" rel="noopener noreferrer">
-                <span className="material-symbols-outlined">code</span>
+                <Icon name="code" size={24} />
               </a>
             </div>
           </div>

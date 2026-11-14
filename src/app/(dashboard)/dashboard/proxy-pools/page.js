@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { Badge, Button, Card, CardSkeleton, Input, Modal, Toggle, ConfirmModal } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import Icon from "../../../../shared/components/icons/Icon";
+import HeaderActions from "@/shared/components/HeaderActions";
+import EmptyState from "@/shared/components/EmptyState";
 
 function getStatusVariant(status) {
   if (status === "active") return "success";
@@ -565,7 +568,7 @@ export default function ProxyPoolsPage() {
 
   if (loading) {
     return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-1 sm:gap-6 sm:px-0">
+      <div className="flex min-w-0 flex-col gap-6">
         <CardSkeleton />
         <CardSkeleton />
       </div>
@@ -573,13 +576,10 @@ export default function ProxyPoolsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-1 sm:gap-6 sm:px-0">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold sm:text-2xl">Proxy Pools</h1>
-        </div>
-
-        <div className="grid grid-cols-1 gap-2 sm:flex sm:items-center">
+    <div className="flex min-w-0 flex-col gap-6">
+      {/* The title is in the header bar, which already shows it with a
+          description. Only the actions move up there. */}
+      <HeaderActions>
           <div className="relative" ref={relayMenuRef}>
             <Button
               size="sm"
@@ -588,9 +588,7 @@ export default function ProxyPoolsPage() {
               onClick={() => setShowRelayMenu(!showRelayMenu)}
             >
               Deploy Relay
-              <span className="material-symbols-outlined ml-1 text-[18px]">
-                {showRelayMenu ? "expand_less" : "expand_more"}
-              </span>
+              <Icon name={showRelayMenu ? "expand_less" : "expand_more"} size={18} className="ml-1" />
             </Button>
 
             {showRelayMenu && (
@@ -602,7 +600,7 @@ export default function ProxyPoolsPage() {
                   }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-[20px] text-orange-500">cloud</span>
+                  <Icon name="cloud" size={20} className="text-orange-500" />
                   Cloudflare Relay
                 </button>
                 <button
@@ -612,7 +610,7 @@ export default function ProxyPoolsPage() {
                   }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-[20px] text-blue-500">cloud_upload</span>
+                  <Icon name="cloud_upload" size={20} className="text-blue-500" />
                   Vercel Relay
                 </button>
                 <button
@@ -622,7 +620,7 @@ export default function ProxyPoolsPage() {
                   }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-text-main transition-colors hover:bg-black/5 dark:hover:bg-white/5"
                 >
-                  <span className="material-symbols-outlined text-[20px] text-green-500">terminal</span>
+                  <Icon name="terminal" size={20} className="text-green-500" />
                   Deno Relay
                 </button>
               </div>
@@ -633,8 +631,7 @@ export default function ProxyPoolsPage() {
             Batch Import
           </Button>
           <Button size="sm" icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
-        </div>
-      </div>
+      </HeaderActions>
 
       <Card>
         <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -655,7 +652,7 @@ export default function ProxyPoolsPage() {
 
         {(selectedIds.length > 0 || healthChecking) && (
           <div className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2">
-            <span className="material-symbols-outlined text-[18px] text-primary">checklist</span>
+            <Icon name="checklist" size={18} className="text-primary" />
             <span className="text-xs font-medium text-primary">
               {selectedIds.length > 0 ? `${selectedIds.length} selected` : "All pools"}
             </span>
@@ -689,13 +686,12 @@ export default function ProxyPoolsPage() {
         )}
 
         {proxyPools.length === 0 ? (
-          <div className="text-center py-10">
-            <p className="text-text-main font-medium mb-1">No proxy pool entries yet</p>
-            <p className="text-sm text-text-muted mb-4">
-              Create a proxy pool entry, then assign it to connections.
-            </p>
-            <Button icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>
-          </div>
+          <EmptyState
+            icon="lan"
+            title="No proxy pool entries yet"
+            description="Create a proxy pool entry, then assign it to connections."
+            action={<Button icon="add" onClick={openCreateModal}>Add Proxy Pool</Button>}
+          />
         ) : (
           <div className="flex flex-col divide-y divide-black/[0.04] dark:divide-white/[0.05]">
             {proxyPools.map((pool) => (
@@ -750,26 +746,21 @@ export default function ProxyPoolsPage() {
                     title="Test proxy"
                     disabled={testingId === pool.id}
                   >
-                    <span
-                      className="material-symbols-outlined text-[18px]"
-                      style={testingId === pool.id ? { animation: "spin 1s linear infinite" } : undefined}
-                    >
-                      {testingId === pool.id ? "progress_activity" : "science"}
-                    </span>
+                    <Icon name={testingId === pool.id ? "progress_activity" : "science"} size={18} style={testingId === pool.id ? { animation: "spin 1s linear infinite" } : undefined} />
                   </button>
                   <button
                     onClick={() => openEditModal(pool)}
                     className="p-2 rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-muted hover:text-primary"
                     title="Edit"
                   >
-                    <span className="material-symbols-outlined text-[18px]">edit</span>
+                    <Icon name="edit" size={18} />
                   </button>
                   <button
                     onClick={() => handleDelete(pool)}
                     className="p-2 rounded hover:bg-red-500/10 text-red-500"
                     title="Delete"
                   >
-                    <span className="material-symbols-outlined text-[18px]">delete</span>
+                    <Icon name="delete" size={18} />
                   </button>
                 </div>
               </div>

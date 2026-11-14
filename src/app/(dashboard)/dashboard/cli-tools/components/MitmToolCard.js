@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from "react";
 import { Card, Button, Badge, Input, ModelSelectModal } from "@/shared/components";
 import { TOOL_HOSTS } from "@/shared/constants/mitmToolHosts";
 import Image from "next/image";
+import Icon from "../../../../../shared/components/icons/Icon";
+import useDialog from "@/shared/hooks/useDialog";
 
 /**
  * Per-tool MITM card — shows DNS status + model mappings.
@@ -26,10 +28,21 @@ export default function MitmToolCard({
   modelAliases = {},
   cloudEnabled,
   onDnsChange,
+  proxyCapture,
 }) {
   const [loading, setLoading] = useState(false);
   const [warning, setWarning] = useState(null);
+  // 0.5.175 — Proxy capture mode. One process serves every intercepted host, so
+  // its state is global: it comes from the page's existing status fetch rather
+  // than one fetch per expanded card.
+  const supportsProxy = (tool.captureModes || ["dns"]).includes("proxy");
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  // Escape and the focus trap come from the hook; the cancel button below
+  // still owns clearing the typed password.
+  const sudoDialog = useDialog({
+    isOpen: showPasswordModal,
+    onClose: () => { setShowPasswordModal(false); setSudoPassword(""); setModalError(null); },
+  });
   const [sudoPassword, setSudoPassword] = useState("");
   const [pendingDnsAction, setPendingDnsAction] = useState(null);
   const [modalError, setModalError] = useState(null);
@@ -112,6 +125,8 @@ export default function MitmToolCard({
     }
   };
 
+
+
   const doDnsAction = async (action, password) => {
     setLoading(true);
     setWarning(null);
@@ -177,7 +192,7 @@ export default function MitmToolCard({
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-medium text-sm">{tool.name}</h3>
+                <h3 className="section-title">{tool.name}</h3>
                 {!serverRunning ? (
                   <Badge variant="default" size="sm">Server off</Badge>
                 ) : dnsActive ? (
@@ -189,9 +204,7 @@ export default function MitmToolCard({
               <p className="text-xs text-text-muted sm:truncate">Intercept {tool.name} requests via MITM proxy</p>
             </div>
           </div>
-          <span className={`material-symbols-outlined text-text-muted text-[20px] transition-transform ${isExpanded ? "rotate-180" : ""}`}>
-            expand_more
-          </span>
+          <Icon name="expand_more" size={20} className={`text-text-muted transition-transform${isExpanded ? "rotate-180" : ""}`} />
         </div>
 
         {isExpanded && (
@@ -212,6 +225,38 @@ export default function MitmToolCard({
             {/* Info */}
             <div className="flex flex-col gap-0.5 text-[11px] text-text-muted px-1">
               <p>Toggle DNS to redirect {tool.name} traffic through kRouter via MITM.</p>
+              {/* 0.5.174 — a tool that cannot fully be intercepted says so here, rather
+                  than letting the user conclude their setup is broken. */}
+              {tool.mitmLimitation && (
+                <p className="text-amber-600 text-[10px] mt-1">⚠️ {tool.mitmLimitation}</p>
+              )}
+              {/* 0.5.175 — The second capture transport. Unlike DNS it needs no
+                  password and leaves nothing behind, but nothing can point an
+                  already-running app at it, so the address is shown to copy. */}
+              {/* Status, not a control. This had its own Start/Stop, which let the
+                  two capture transports be driven apart — and a proxy left
+                  listening with no MITM behind it accepts connections, reports
+                  healthy and fails every intercepted request, which reads as a
+                  network fault. The MITM server now starts and stops it, so the
+                  one thing left worth showing is whether it is up and the address
+                  to point an app at. */}
+              {supportsProxy && (
+                <div className="mt-2 rounded-md border border-border/60 p-2">
+                  <span className="text-[11px] font-medium text-text">
+                    Proxy capture {proxyCapture?.running ? "· running" : "· stopped"}
+                  </span>
+                  <p className="mt-1 text-[10px]">
+                    Follows the MITM server — it starts and stops with it. No password, no
+                    /etc/hosts, and only the app you point at it, so it cannot leave{" "}
+                    {tool.mitmDomain || "the vendor"} unreachable.
+                  </p>
+                  {proxyCapture?.running && (
+                    <code className="mt-1 block break-all rounded bg-surface px-1.5 py-1 text-[10px]">
+                      HTTPS_PROXY={proxyCapture.proxyUrl} {tool.id === "claude" ? "claude" : tool.name.toLowerCase()}
+                    </code>
+                  )}
+                </div>
+              )}
               {!dnsActive && (
                 <p className="text-amber-600 text-[10px] mt-1">
                   ⚠️ Enable DNS to edit model mappings
@@ -225,7 +270,7 @@ export default function MitmToolCard({
                 {tool.defaultModels.map((model) => (
                   <div key={model.alias} className="grid grid-cols-1 gap-1.5 sm:grid-cols-[9rem_auto_1fr_auto] sm:items-center sm:gap-2">
                     <span className="text-xs font-semibold text-text-main sm:text-right">{model.name}</span>
-                    <span className="material-symbols-outlined hidden text-text-muted text-[14px] sm:inline">arrow_forward</span>
+                    <Icon name="arrow_forward" size={14} className="hidden text-text-muted sm:inline" />
                     <div className="relative w-full min-w-0">
                       <input
                         type="text"
@@ -245,7 +290,7 @@ export default function MitmToolCard({
                           className="absolute right-1 top-1/2 -translate-y-1/2 p-0.5 text-text-muted hover:text-red-500 rounded transition-colors"
                           title="Clear"
                         >
-                          <span className="material-symbols-outlined text-[14px]">close</span>
+                          <Icon name="close" size={14} />
                         </button>
                       )}
                     </div>
@@ -273,7 +318,7 @@ export default function MitmToolCard({
                   disabled={!serverRunning || loading}
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-medium text-red-500 transition-colors hover:bg-red-500/20 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-1.5"
                 >
-                  <span className="material-symbols-outlined text-[16px]">stop_circle</span>
+                  <Icon name="stop_circle" size={16} />
                   Stop DNS
                 </button>
               ) : (
@@ -282,7 +327,7 @@ export default function MitmToolCard({
                   disabled={!serverRunning || loading}
                   className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-medium text-primary transition-colors hover:bg-primary/20 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:py-1.5"
                 >
-                  <span className="material-symbols-outlined text-[16px]">play_circle</span>
+                  <Icon name="play_circle" size={16} />
                   Start DNS
                 </button>
               )}
@@ -290,13 +335,13 @@ export default function MitmToolCard({
               {/* Warning below button */}
               {warning && (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-amber-500">
-                  <span className="material-symbols-outlined text-[14px]">warning</span>
+                  <Icon name="warning" size={14} />
                   <span>{warning}</span>
                 </div>
               )}
               {actionError && (
                 <div className="flex items-center gap-2 px-2 py-1.5 rounded text-xs text-red-500">
-                  <span className="material-symbols-outlined text-[14px]">error</span>
+                  <Icon name="error" size={14} />
                   <span>{actionError}</span>
                 </div>
               )}
@@ -308,10 +353,10 @@ export default function MitmToolCard({
       {/* Password Modal */}
       {showPasswordModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-          <div className="mx-4 flex w-full max-w-sm flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-xl sm:p-6">
-            <h3 className="font-semibold text-text-main">Sudo Password Required</h3>
+          <div {...sudoDialog.panelProps} className="mx-4 flex w-full max-w-sm flex-col gap-4 rounded-xl border border-border bg-surface p-5 shadow-xl outline-none sm:p-6">
+            <h3 id={sudoDialog.titleId} className="section-title">Sudo Password Required</h3>
             <div className="flex items-start gap-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg">
-              <span className="material-symbols-outlined text-yellow-500 text-[20px]">warning</span>
+              <Icon name="warning" size={20} className="text-yellow-500" />
               <p className="text-xs text-text-muted">Required to modify /etc/hosts and flush DNS cache</p>
             </div>
             <Input
@@ -323,7 +368,7 @@ export default function MitmToolCard({
             />
             {modalError && (
               <div className="flex items-center gap-2 px-2 py-1.5 rounded text-xs bg-red-500/10 text-red-600">
-                <span className="material-symbols-outlined text-[14px]">error</span>
+                <Icon name="error" size={14} />
                 <span>{modalError}</span>
               </div>
             )}

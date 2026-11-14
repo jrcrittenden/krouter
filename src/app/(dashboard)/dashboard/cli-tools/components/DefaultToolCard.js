@@ -5,6 +5,7 @@ import { Card, ModelSelectModal } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import Image from "next/image";
 import ApiKeySelect from "./ApiKeySelect";
+import Icon from "../../../../../shared/components/icons/Icon";
 
 export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, baseUrl, apiKeys, activeProviders = [], cloudEnabled = false, tunnelEnabled = false }) {
   const [copiedField, setCopiedField] = useState(null);
@@ -61,14 +62,14 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
           value={modelValue}
           onChange={(e) => setModelValue(e.target.value)}
           placeholder="provider/model-id"
-          className="w-full sm:w-auto flex-1 px-3 py-2 bg-bg-secondary rounded-lg text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary/50"
+          className="w-full sm:w-auto flex-1 px-3 py-2 bg-surface-2 rounded-lg text-sm border border-border focus:outline-none focus:ring-1 focus:ring-primary/50"
         />
         <button
           onClick={() => setShowModelModal(true)}
           disabled={!hasActiveProviders}
           className={`shrink-0 px-3 py-2 rounded-lg border text-sm transition-colors ${
             hasActiveProviders
-              ? "bg-bg-secondary border-border text-text-main hover:border-primary cursor-pointer"
+              ? "bg-surface-2 border-border text-text-main hover:border-primary cursor-pointer"
               : "opacity-50 cursor-not-allowed border-border"
           }`}
         >
@@ -78,18 +79,16 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
           <>
             <button
               onClick={() => handleCopy(modelValue, "model")}
-              className="shrink-0 px-3 py-2 bg-bg-secondary hover:bg-bg-tertiary rounded-lg border border-border transition-colors"
+              className="shrink-0 px-3 py-2 bg-surface-2 hover:bg-surface-3 rounded-lg border border-border transition-colors"
             >
-              <span className="material-symbols-outlined text-lg">
-                {copiedField === "model" ? "check" : "content_copy"}
-              </span>
+              <Icon name={copiedField === "model" ? "check" : "content_copy"} size={18} />
             </button>
             <button
               onClick={() => setModelValue("")}
               className="p-2 text-text-muted hover:text-red-500 rounded transition-colors"
               title="Clear"
             >
-              <span className="material-symbols-outlined text-lg">close</span>
+              <Icon name="close" size={18} />
             </button>
           </>
         )}
@@ -128,7 +127,7 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
           
           return (
             <div key={index} className={`flex items-start gap-3 p-3 rounded-lg border ${bgClass}`}>
-              <span className={`material-symbols-outlined text-lg ${iconClass}`}>{icon}</span>
+              <Icon name={icon} size={18} className={`${iconClass}`} />
               <p className={`text-sm ${textClass}`}>{note.text}</p>
             </div>
           );
@@ -164,17 +163,15 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
               {item.type === "modelSelector" && renderModelSelector()}
               {item.value && (
                 <div className="mt-2 flex flex-col sm:flex-row sm:items-center gap-2">
-                  <code className="w-full sm:w-auto flex-1 px-3 py-2 bg-bg-secondary rounded-lg text-sm font-mono border border-border truncate">
+                  <code className="w-full sm:w-auto flex-1 px-3 py-2 bg-surface-2 rounded-lg text-sm font-mono border border-border truncate">
                     {replaceVars(item.value)}
                   </code>
                   {item.copyable && (
                     <button
                       onClick={() => handleCopy(item.value, `${item.step}-${item.title}`)}
-                      className="shrink-0 px-3 py-2 bg-bg-secondary hover:bg-bg-tertiary rounded-lg border border-border transition-colors"
+                      className="shrink-0 px-3 py-2 bg-surface-2 hover:bg-surface-3 rounded-lg border border-border transition-colors"
                     >
-                      <span className="material-symbols-outlined text-lg">
-                        {copiedField === `${item.step}-${item.title}` ? "check" : "content_copy"}
-                      </span>
+                      <Icon name={copiedField === `${item.step}-${item.title}` ? "check" : "content_copy"} size={18} />
                     </button>
                   )}
                 </div>
@@ -189,15 +186,13 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
               <span className="text-xs text-text-muted uppercase tracking-wide">{tool.codeBlock.language}</span>
               <button
                 onClick={() => handleCopy(tool.codeBlock.code, "codeblock")}
-                className="flex items-center gap-1 px-2 py-1 text-xs bg-bg-secondary hover:bg-bg-tertiary rounded border border-border transition-colors"
+                className="flex items-center gap-1 px-2 py-1 text-xs bg-surface-2 hover:bg-surface-3 rounded border border-border transition-colors"
               >
-                <span className="material-symbols-outlined text-sm">
-                  {copiedField === "codeblock" ? "check" : "content_copy"}
-                </span>
+                <Icon name={copiedField === "codeblock" ? "check" : "content_copy"} size={14} />
                 {copiedField === "codeblock" ? "Copied!" : "Copy"}
               </button>
             </div>
-            <pre className="p-4 bg-bg-secondary rounded-lg border border-border overflow-x-auto">
+            <pre className="p-4 bg-surface-2 rounded-lg border border-border overflow-x-auto">
               <code className="text-sm font-mono whitespace-pre">{replaceVars(tool.codeBlock.code)}</code>
             </pre>
           </div>
@@ -221,7 +216,7 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
       );
     }
     if (tool.icon) {
-      return <span className="material-symbols-outlined text-xl" style={{ color: tool.color }}>{tool.icon}</span>;
+      return <Icon name={tool.icon} size={20} style={{ color: tool.color }} />;
     }
     return (
       <Image
@@ -244,11 +239,11 @@ export default function DefaultToolCard({ toolId, tool, isExpanded, onToggle, ba
             {renderIcon()}
           </div>
           <div className="min-w-0">
-            <h3 className="font-medium text-sm">{tool.name}</h3>
+            <h3 className="section-title">{tool.name}</h3>
             <p className="text-xs text-text-muted truncate">{tool.description}</p>
           </div>
         </div>
-        <span className={`material-symbols-outlined text-text-muted text-[20px] transition-transform ${isExpanded ? "rotate-180" : ""}`}>expand_more</span>
+        <Icon name="expand_more" size={20} className={`text-text-muted transition-transform${isExpanded ? "rotate-180" : ""}`} />
       </div>
 
       {isExpanded && (

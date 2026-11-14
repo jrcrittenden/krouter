@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/shared/utils/cn";
+import Icon from "./icons/Icon";
 
 // Spinner loading
 export function Spinner({ size = "md", className }) {
@@ -12,22 +13,26 @@ export function Spinner({ size = "md", className }) {
   };
 
   return (
-    <span
-      className={cn(
-        "material-symbols-outlined animate-spin text-brand-500",
+    <Icon name="progress_activity" size={24} className={cn(
+        "animate-spin text-brand-500",
         sizes[size],
         className
-      )}
-    >
-      progress_activity
-    </span>
+      )} />
   );
 }
 
 // Full page loading
 export function PageLoading({ message = "Loading..." }) {
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg">
+    // Not a dialog, despite covering the page: there is nothing to interact
+    // with and nothing to dismiss, so it takes no focus. It is a status, and
+    // `role="status"` is the polite live region that announces the message
+    // without interrupting whatever a screen reader is already reading.
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-bg"
+    >
       <Spinner size="xl" />
       <p className="mt-4 text-text-muted">{message}</p>
     </div>

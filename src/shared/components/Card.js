@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@/shared/utils/cn";
+import Icon from "./icons/Icon";
 
 /**
  * Every card rendered at one visual weight, so a page of six cards gave the reader no
@@ -54,12 +55,12 @@ export default function Card({
           <div className="flex items-center gap-3">
             {icon && (
               <div className="p-2 rounded-[10px] bg-bg text-text-muted">
-                <span className="material-symbols-outlined text-[20px]">{icon}</span>
+                <Icon name={icon} size={20} />
               </div>
             )}
             <div>
               {title && (
-                <h3 className="text-[15px] leading-5 text-text-main font-semibold tracking-[-0.01em]">{title}</h3>
+                <h3 className="section-title text-[15px] leading-5 tracking-[-0.01em]">{title}</h3>
               )}
               {subtitle && (
                 <p className="text-[13px] leading-5 text-text-muted mt-0.5">{subtitle}</p>

@@ -23,6 +23,26 @@ function apiKeyBucketId(key, model, provider) {
   return `key_${ref}|${model}|${provider || "unknown"}`;
 }
 
+/**
+ * Whether `ts` is a better lastUsed than what a bucket already has.
+ *
+ * `current` is either a day key from the usageDaily rollup ("2026-11-13") or a
+ * full ISO timestamp from an earlier overlay row. `new Date("2026-11-13")`
+ * parses as UTC midnight, so in any timezone ahead of UTC an entry recorded
+ * between local midnight and that offset compared as OLDER than its own day key
+ * and was never refined: for the first hours of each local day the dashboard
+ * showed a bare date where every other row showed a time. At UTC+6 that is
+ * 00:00–06:00 every day.
+ *
+ * A day key is always coarser than a timestamp the overlay just read, and the
+ * overlay only reads the last two days, so the day key never wins.
+ */
+function isBetterLastUsed(ts, current) {
+  if (!current) return true;
+  if (!String(current).includes("T")) return true;
+  return new Date(ts) > new Date(current);
+}
+
 const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
@@ -78,8 +98,21 @@ function aggregateEntryToDay(day, entry) {
   day.byAccount ||= {};
   day.byApiKey ||= {};
   day.byEndpoint ||= {};
+  day.byTool ||= {};
 
   if (entry.provider) addToCounter(day.byProvider, entry.provider, vals);
+
+  // Only captured requests have a tool, so this bucket is deliberately not a
+  // partition of the day: byProvider covers every request, byTool covers the
+  // ones that came through the MITM.
+  //
+  // Keyed tool|model|provider, like byEndpoint, so a tool's spend breaks down by
+  // the model it was actually served on — which is the whole point here, since
+  // the model is the thing the MITM rewrote on the way through.
+  if (entry.tool) {
+    const toolKey = `${entry.tool}|${entry.model}|${entry.provider || "unknown"}`;
+    addToCounter(day.byTool, toolKey, { ...vals, meta: { tool: entry.tool, rawModel: entry.model, provider: entry.provider } });
+  }
 
   const modelKey = entry.provider ? `${entry.model}|${entry.provider}` : entry.model;
   addToCounter(day.byModel, modelKey, { ...vals, meta: { rawModel: entry.model, provider: entry.provider } });
@@ -281,7 +314,11 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          // `meta` was written as a literal {} on every row since the column was
+          // added. The captured tool goes here rather than in a new column so
+          // existing databases need no migration: a row written before this
+          // reads back as {} and reports no tool, which is correct for it.
+          stringifyJson(tokens), stringifyJson(entry.tool ? { tool: entry.tool } : {}),
         ]
       );
 
@@ -289,7 +326,7 @@ export async function saveRequestUsage(entry) {
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       const day = row ? parseJson(row.data, {}) : {
         requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
-        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+        byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {}, byTool: {},
       };
       aggregateEntryToDay(day, entry);
       db.run(`INSERT INTO usageDaily(dateKey, data) VALUES(?, ?) ON CONFLICT(dateKey) DO UPDATE SET data = excluded.data`, [dateKey, stringifyJson(day)]);
@@ -318,12 +355,16 @@ export async function getUsageHistory(filter = {}) {
   if (filter.endDate) { conds.push("timestamp <= ?"); params.push(new Date(filter.endDate).toISOString()); }
 
   const where = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
-  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ${where} ORDER BY id ASC`, params);
+  const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ${where} ORDER BY id ASC`, params);
 
   return rows.map((r) => ({
     timestamp: r.timestamp, provider: r.provider, model: r.model,
     connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
     cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
+    // Lifted out of `meta` rather than handed over raw: every caller wanting the
+    // captured tool would otherwise parse the same JSON blob itself. null for a
+    // direct caller, and for every row written before this was recorded.
+    tool: parseJson(r.meta, {})?.tool || null,
   }));
 }
 
@@ -391,7 +432,7 @@ export async function getUsageStats(period = "all") {
   const stats = {
     totalRequests: 0,
     totalPromptTokens: 0, totalCompletionTokens: 0, totalCost: 0,
-    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
+    byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {}, byTool: {},
     last10Minutes: [],
     pending: pendingRequests,
     activeRequests: [],
@@ -459,6 +500,23 @@ export async function getUsageStats(period = "all") {
         stats.byProvider[prov].promptTokens += p.promptTokens || 0;
         stats.byProvider[prov].completionTokens += p.completionTokens || 0;
         stats.byProvider[prov].cost += p.cost || 0;
+      }
+
+      for (const [tk, t] of Object.entries(day.byTool || {})) {
+        const tool = t.tool || tk.split("|")[0];
+        const rawModel = t.rawModel || tk.split("|")[1] || "";
+        const provider = t.provider || tk.split("|")[2] || "";
+        if (!stats.byTool[tk]) {
+          stats.byTool[tk] = {
+            requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+            tool, rawModel, provider: providerNodeNameMap[provider] || provider, lastUsed: dateKey,
+          };
+        }
+        stats.byTool[tk].requests += t.requests || 0;
+        stats.byTool[tk].promptTokens += t.promptTokens || 0;
+        stats.byTool[tk].completionTokens += t.completionTokens || 0;
+        stats.byTool[tk].cost += t.cost || 0;
+        if (dateKey > (stats.byTool[tk].lastUsed || "")) stats.byTool[tk].lastUsed = dateKey;
       }
 
       for (const [mk, m] of Object.entries(day.byModel || {})) {
@@ -541,18 +599,18 @@ export async function getUsageStats(period = "all") {
       Date.now() - LAST_USED_OVERLAY_WINDOW_MS
     );
     const histRows = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint FROM usageHistory WHERE timestamp >= ?`,
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, meta FROM usageHistory WHERE timestamp >= ?`,
       [new Date(overlayCutoff).toISOString()]
     );
     for (const e of histRows) {
       const ts = e.timestamp;
       const modelKey = e.provider ? `${e.model} (${e.provider})` : e.model;
-      if (stats.byModel[modelKey] && new Date(ts) > new Date(stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = ts;
+      if (stats.byModel[modelKey] && isBetterLastUsed(ts, stats.byModel[modelKey].lastUsed)) stats.byModel[modelKey].lastUsed = ts;
 
       if (e.connectionId) {
         const accountName = connectionMap[e.connectionId] || `Account ${e.connectionId.slice(0, 8)}...`;
         const accountKey = `${e.model} (${e.provider} - ${accountName})`;
-        if (stats.byAccount[accountKey] && new Date(ts) > new Date(stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = ts;
+        if (stats.byAccount[accountKey] && isBetterLastUsed(ts, stats.byAccount[accountKey].lastUsed)) stats.byAccount[accountKey].lastUsed = ts;
       }
 
       // 0.5.166 — same bucket ids as the daily loop above; the no-key form now
@@ -560,11 +618,19 @@ export async function getUsageStats(period = "all") {
       const apiKeyKey = (e.apiKey && typeof e.apiKey === "string")
         ? apiKeyBucketId(e.apiKey, e.model, e.provider)
         : `local-no-key|${e.model}|${e.provider || "unknown"}`;
-      if (stats.byApiKey[apiKeyKey] && new Date(ts) > new Date(stats.byApiKey[apiKeyKey].lastUsed)) stats.byApiKey[apiKeyKey].lastUsed = ts;
+      if (stats.byApiKey[apiKeyKey] && isBetterLastUsed(ts, stats.byApiKey[apiKeyKey].lastUsed)) stats.byApiKey[apiKeyKey].lastUsed = ts;
 
       const endpoint = e.endpoint || "Unknown";
       const endpointKey = `${endpoint}|${e.model}|${e.provider || "unknown"}`;
-      if (stats.byEndpoint[endpointKey] && new Date(ts) > new Date(stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
+      if (stats.byEndpoint[endpointKey] && isBetterLastUsed(ts, stats.byEndpoint[endpointKey].lastUsed)) stats.byEndpoint[endpointKey].lastUsed = ts;
+
+      // byTool gets the same treatment, or a captured tool would be the one row
+      // on the page still showing a date where its neighbours show a time.
+      const rowTool = parseJson(e.meta, {})?.tool || null;
+      if (rowTool) {
+        const toolKey = `${rowTool}|${e.model}|${e.provider || "unknown"}`;
+        if (stats.byTool[toolKey] && isBetterLastUsed(ts, stats.byTool[toolKey].lastUsed)) stats.byTool[toolKey].lastUsed = ts;
+      }
     }
   } else {
     // 24h / today: live history
@@ -577,7 +643,11 @@ export async function getUsageStats(period = "all") {
       cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
     }
     const filtered = db.all(
-      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
+      // `meta` carries the captured tool. It was not selected here, so this path
+      // — the one that serves period="today" and "24h", i.e. what the dashboard
+      // asks for — would have reported no tools at all while the daily rollup
+      // reported them correctly.
+      `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens, meta FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
     );
 
@@ -599,6 +669,23 @@ export async function getUsageStats(period = "all") {
       stats.byProvider[r.provider].promptTokens += promptTokens;
       stats.byProvider[r.provider].completionTokens += completionTokens;
       stats.byProvider[r.provider].cost += entryCost;
+
+      const rowTool = parseJson(r.meta, {})?.tool || null;
+      if (rowTool) {
+        const tk = `${rowTool}|${r.model}|${r.provider || "unknown"}`;
+        if (!stats.byTool[tk]) {
+          stats.byTool[tk] = {
+            requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+            tool: rowTool, rawModel: r.model, provider: providerDisplayName, lastUsed: r.timestamp,
+          };
+        }
+        const te = stats.byTool[tk];
+        te.requests++;
+        te.promptTokens += promptTokens;
+        te.completionTokens += completionTokens;
+        te.cost += entryCost;
+        if (new Date(r.timestamp) > new Date(te.lastUsed)) te.lastUsed = r.timestamp;
+      }
 
       const modelKey = r.provider ? `${r.model} (${r.provider})` : r.model;
       if (!stats.byModel[modelKey]) {

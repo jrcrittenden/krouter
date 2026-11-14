@@ -10,6 +10,7 @@ import { cn } from "@/shared/utils/cn";
 import { APP_CONFIG } from "@/shared/constants/config";
 import { LOCALE_COOKIE, normalizeLocale } from "@/i18n/config";
 import { LOCALE_FLAGS } from "@/shared/constants/locales";
+import Icon from "../../../../shared/components/icons/Icon";
 
 function getLocaleFromCookie() {
   if (typeof document === "undefined") return "en";
@@ -609,17 +610,17 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto px-4 sm:px-0">
+    <div>
       <div className="flex flex-col gap-6">
         {/* Local Mode Info */}
         <Card>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-4">
             <div className="flex items-center gap-3 sm:gap-4">
               <div className="size-10 sm:size-12 rounded-lg bg-green-500/10 text-green-500 flex items-center justify-center shrink-0">
-                <span className="material-symbols-outlined text-xl sm:text-2xl">computer</span>
+                <Icon name="computer" size={20} className="sm:h-6 sm:w-6" />
               </div>
               <div>
-                <h2 className="text-lg sm:text-xl font-semibold">{isRemoteHost ? "Remote Mode" : "Local Mode"}</h2>
+                <h2 className="section-title">{isRemoteHost ? "Remote Mode" : "Local Mode"}</h2>
                 <p className="text-sm text-text-muted">{isRemoteHost ? "Running on the host you connected to" : "Running on your machine"}</p>
               </div>
             </div>
@@ -636,9 +637,7 @@ export default function ProfilePage() {
                       : "text-text-muted hover:text-text-main"
                   )}
                 >
-                  <span className="material-symbols-outlined text-[18px]">
-                    {option === "light" ? "light_mode" : option === "dark" ? "dark_mode" : "contrast"}
-                  </span>
+                  <Icon name={option === "light" ? "light_mode" : option === "dark" ? "dark_mode" : "contrast"} size={18} />
                   <span className="capitalize text-xs sm:text-sm">{option}</span>
                 </button>
               ))}
@@ -690,9 +689,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="size-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
-              <span className="material-symbols-outlined text-[20px]">language</span>
+              <Icon name="language" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Language</h3>
+            <h3 className="section-title">Language</h3>
           </div>
           <button
             onClick={() => setLangOpen(true)}
@@ -708,9 +707,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0">
-              <span className="material-symbols-outlined text-[20px]">shield</span>
+              <Icon name="shield" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Security</h3>
+            <h3 className="section-title">Security</h3>
           </div>
           <div className="flex flex-col gap-4">
             <div className="flex items-start sm:items-center justify-between gap-4">
@@ -794,17 +793,15 @@ export default function ProfilePage() {
             className="w-full flex items-center gap-3 text-left"
           >
             <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">lock_open</span>
+              <Icon name="lock_open" size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-base sm:text-lg font-semibold">OIDC Dashboard Login</h3>
+              <h3 className="section-title">OIDC Dashboard Login</h3>
               <p className="text-xs text-text-muted">
                 {settings.authMode === "oidc" ? "OIDC active" : settings.authMode === "both" ? "Password + OIDC active" : "Optional SSO via Authentik/Keycloak/Google"}
               </p>
             </div>
-            <span className="material-symbols-outlined text-text-muted shrink-0">
-              {oidcExpanded ? "expand_less" : "expand_more"}
-            </span>
+            <Icon name={oidcExpanded ? "expand_less" : "expand_more"} size={24} className="text-text-muted shrink-0" />
           </button>
           {oidcExpanded && (
           <div className="flex flex-col gap-4 mt-4">
@@ -953,9 +950,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">route</span>
+              <Icon name="route" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Routing Strategy</h3>
+            <h3 className="section-title">Routing Strategy</h3>
           </div>
           <div className="flex flex-col gap-4">
             <div className="flex items-start sm:items-center justify-between gap-4">
@@ -1061,9 +1058,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">psychology</span>
+              <Icon name="psychology" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Task-Aware Routing</h3>
+            <h3 className="section-title">Task-Aware Routing</h3>
           </div>
           <div className="flex flex-col gap-4">
             <div className="flex items-start sm:items-center justify-between gap-4">
@@ -1093,9 +1090,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">emergency</span>
+              <Icon name="emergency" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Emergency Fallback</h3>
+            <h3 className="section-title">Emergency Fallback</h3>
           </div>
           <div className="flex flex-col gap-4">
             <div className="flex items-start sm:items-center justify-between gap-4">
@@ -1181,9 +1178,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">database</span>
+              <Icon name="database" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Cache Control</h3>
+            <h3 className="section-title">Cache Control</h3>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -1256,9 +1253,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">wifi</span>
+              <Icon name="wifi" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Network</h3>
+            <h3 className="section-title">Network</h3>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -1328,9 +1325,9 @@ export default function ProfilePage() {
         <Card>
           <div className="flex items-center gap-3 mb-4">
             <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">monitoring</span>
+              <Icon name="monitoring" size={20} />
             </div>
-            <h3 className="text-base sm:text-lg font-semibold">Observability</h3>
+            <h3 className="section-title">Observability</h3>
           </div>
           <div className="flex items-start sm:items-center justify-between gap-4">
             <div className="flex-1 min-w-0">

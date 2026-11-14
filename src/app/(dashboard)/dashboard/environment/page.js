@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { Card, CardSkeleton } from "@/shared/components";
+import Icon from "../../../../shared/components/icons/Icon";
 
 export default function EnvironmentPage() {
   const [loading, setLoading] = useState(true);
@@ -44,8 +45,9 @@ export default function EnvironmentPage() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Title is in the header bar; this paragraph stays because of the live
+          set/total count at the end of it. */}
       <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold">Environment</h1>
         <p className="text-sm text-text-muted">
           Every environment variable kRouter recognizes, what it does, and whether it's currently set on this process.
           Secrets are masked — click the eye icon to reveal.{" "}
@@ -79,8 +81,8 @@ export default function EnvironmentPage() {
           return (
             <Card key={cat.key} padding="sm">
               <div className="flex items-center gap-2 mb-3">
-                <span className="material-symbols-outlined text-primary text-[20px]">{cat.icon}</span>
-                <h2 className="text-base font-semibold">{cat.label}</h2>
+                <Icon name={cat.icon} size={20} className="text-primary" />
+                <h2 className="section-title">{cat.label}</h2>
                 <span className="text-xs text-text-muted">({vars.length})</span>
               </div>
               <div className="flex flex-col gap-1.5">
@@ -149,9 +151,7 @@ function EnvVarRow({ v, revealed, onToggleReveal }) {
                   className="shrink-0 text-text-muted hover:text-primary transition-colors"
                   title={revealed ? "Hide value" : "Reveal (still masked)"}
                 >
-                  <span className="material-symbols-outlined text-[16px]">
-                    {revealed ? "visibility_off" : "visibility"}
-                  </span>
+                  <Icon name={revealed ? "visibility_off" : "visibility"} size={16} />
                 </button>
               )}
             </>

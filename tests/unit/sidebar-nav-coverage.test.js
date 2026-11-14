@@ -15,25 +15,46 @@ import path from "node:path";
  * test failure instead of a silent regression.
  */
 
-const SIDEBAR = "src/shared/components/Sidebar.js";
+// The nav data moved out of Sidebar.js when the flat list was grouped into
+// sections. Scanning the component for hrefs would now find none and quietly
+// pass every check below -- this guard has to follow the data.
+const NAV_DATA = "src/shared/components/nav/navSections.js";
 const DASHBOARD_DIR = "src/app/(dashboard)/dashboard";
 
-/** Pages deliberately absent from the sidebar, each with the reason it is reachable. */
-const NOT_IN_SIDEBAR = {
-  profile: "reached from the account menu, not the nav list",
-};
-// media-providers needs no entry here: the sidebar links its /web sub-page, and the
-// slug match below counts a parent as covered when any of its sub-pages is linked.
+/**
+ * Pages deliberately absent from the sidebar, each with the reason.
+ *
+ * Empty, and that is the point. The last entry was basic-chat, exempted
+ * because the nav "had the entry commented out" — and by the time anyone
+ * looked, navSections.js contained no mention of basic-chat in any form,
+ * commented or otherwise. The page had shipped in the initial release and was
+ * reachable only by typing the URL. An exemption whose reason has gone stale
+ * is indistinguishable from the orphaned page this guard was written to catch,
+ * so a new one needs a reason that can be checked against the code.
+ */
+const NOT_IN_SIDEBAR = {};
+// `profile` was an exception while Settings was a hardcoded <Link> outside the
+// nav array, invisible to the scan. It is a normal System entry now.
+// `media-providers` is the accordion, which records a basePath instead of an
+// href; the scan reads both.
 
-const src = readFileSync(SIDEBAR, "utf8");
+const src = readFileSync(NAV_DATA, "utf8");
 const navSlugs = new Set(
-  [...src.matchAll(/href:\s*"\/dashboard\/([a-z0-9-]+)/g)].map((m) => m[1])
+  [...src.matchAll(/(?:href|basePath):\s*"\/dashboard\/([a-z0-9-]+)/g)].map((m) => m[1])
 );
 const pageSlugs = readdirSync(DASHBOARD_DIR, { withFileTypes: true })
   .filter((e) => e.isDirectory() && !e.name.startsWith("["))
   .map((e) => e.name);
 
 describe("sidebar navigation coverage", () => {
+  it("found the nav data at all", () => {
+    // Everything below is a set-difference against navSlugs, so an empty set
+    // makes the orphan and dangling checks vacuously pass. If the data moves
+    // again, fail here rather than go quiet.
+    expect(navSlugs.size, `no hrefs found in ${NAV_DATA} -- did the nav data move?`)
+      .toBeGreaterThan(5);
+  });
+
   it("links the MITM page", () => {
     expect(navSlugs.has("mitm")).toBe(true);
   });

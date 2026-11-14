@@ -1,109 +1,105 @@
 "use client";
 
-import { useEffect } from "react";
+import { useId } from "react";
 import { cn } from "@/shared/utils/cn";
 import Button from "./Button";
-import Tooltip from "./Tooltip";
+import Icon from "./icons/Icon";
+import useDialog from "@/shared/hooks/useDialog";
 
+const SIZES = {
+  sm: "max-w-sm",
+  md: "max-w-md",
+  lg: "max-w-lg",
+  xl: "max-w-xl",
+  full: "max-w-4xl",
+};
+
+/**
+ * A dialog.
+ *
+ * It used to open as a plain `<div>` with macOS traffic lights along the top —
+ * one real close button and two grey circles with `cursor-not-allowed`, which
+ * is window chrome drawn on something that is not a window, and two controls
+ * drawn on things that do nothing. The real problems were underneath: no
+ * `role="dialog"`, so a screen reader announced the content as part of the page
+ * it was covering; focus never moved into it, so the first Tab went to the
+ * element behind the overlay; and nothing brought focus back when it closed.
+ *
+ * Now it announces itself, takes focus on open, keeps Tab inside while it is
+ * up, and hands focus back to whatever opened it.
+ */
 export default function Modal({
   isOpen,
   onClose,
   title,
+  description,
   children,
   footer,
   size = "md",
   closeOnOverlay = true,
-  showTrafficLights = true,
   className,
 }) {
-  const sizes = {
-    sm: "max-w-sm",
-    md: "max-w-md",
-    lg: "max-w-lg",
-    xl: "max-w-xl",
-    full: "max-w-4xl",
-  };
-
-  useEffect(() => {
-    if (isOpen) {
-      document.body.style.overflow = "hidden";
-    } else {
-      document.body.style.overflow = "";
-    }
-    return () => { document.body.style.overflow = ""; };
-  }, [isOpen]);
-
-  useEffect(() => {
-    const handleEscape = (e) => {
-      if (e.key === "Escape" && isOpen) onClose();
-    };
-    document.addEventListener("keydown", handleEscape);
-    return () => document.removeEventListener("keydown", handleEscape);
-  }, [isOpen, onClose]);
+  const descId = useId();
+  const { titleId, panelProps } = useDialog({ isOpen, onClose, labelled: Boolean(title) });
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      {/* Overlay */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-[2px] fade-in"
+      <button
+        type="button"
+        aria-label="Close dialog"
+        tabIndex={-1}
         onClick={closeOnOverlay ? onClose : undefined}
+        className={cn(
+          "absolute inset-0 bg-black/60 backdrop-blur-[2px] fade-in",
+          closeOnOverlay ? "cursor-default" : "cursor-default pointer-events-none"
+        )}
       />
 
-      {/* Modal content */}
       <div
+        {...panelProps}
+        aria-describedby={description ? descId : undefined}
         className={cn(
-          "relative w-full bg-surface",
-          "border border-border-subtle",
-          "rounded-[14px] shadow-[var(--shadow-elev)]",
+          "relative w-full flex flex-col max-h-[88vh] outline-none",
+          "bg-surface border border-border-subtle",
+          "rounded-[16px] shadow-[var(--shadow-elev)]",
           "fade-in",
-          sizes[size],
+          SIZES[size],
           className
         )}
       >
-        {/* Header */}
-        {(title || showTrafficLights) && (
-          <div className="flex items-center justify-between p-2 border-b border-border-subtle">
-            <div className="flex items-center">
-              {/* Traffic lights — desktop only */}
-              {showTrafficLights && (
-                <div className="hidden md:flex items-center gap-2 mr-4 ml-2">
-                  <Tooltip text="Close" position="top" color="#FF5F56">
-                    <button
-                      onClick={onClose}
-                      aria-label="Close"
-                      title="Close"
-                      className="w-4 h-4 rounded-full bg-[#FF5F56] hover:brightness-90 transition-all cursor-pointer flex items-center justify-center group/dot"
-                    >
-                      <span className="text-[9px] font-bold text-white opacity-0 group-hover/dot:opacity-100 transition-opacity leading-none">✕</span>
-                    </button>
-                  </Tooltip>
-                  <div className="w-4 h-4 rounded-full bg-[#3a3a3a]/20 dark:bg-white/15 cursor-not-allowed" />
-                  <div className="w-4 h-4 rounded-full bg-[#3a3a3a]/20 dark:bg-white/15 cursor-not-allowed" />
-                </div>
-              )}
-              {title && (
-                <h2 className="text-lg font-semibold text-text-main">{title}</h2>
+        {title && (
+          <div className="flex items-start justify-between gap-4 px-6 pt-5 pb-4 border-b border-border-subtle">
+            <div className="min-w-0">
+              <h2
+                id={titleId}
+                className="text-[17px] font-semibold text-text-main tracking-[-0.01em]"
+                style={{ fontFamily: "var(--font-display)" }}
+              >
+                {title}
+              </h2>
+              {description && (
+                <p id={descId} className="mt-1 text-[13px] leading-5 text-text-muted">
+                  {description}
+                </p>
               )}
             </div>
-            {/* X button — mobile only */}
             <button
+              type="button"
               onClick={onClose}
               aria-label="Close"
-              className="md:hidden p-1.5 rounded-[10px] text-text-muted hover:bg-surface-2 hover:text-text-main transition-colors"
+              className="-mr-1.5 -mt-0.5 shrink-0 rounded-[10px] p-1.5 text-text-muted transition-colors hover:bg-surface-2 hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
             >
-              <span className="material-symbols-outlined text-[20px]">close</span>
+              <Icon name="close" size={18} />
             </button>
           </div>
         )}
 
-        {/* Body */}
-        <div className="p-6 max-h-[calc(85vh-100px)] overflow-y-auto custom-scrollbar">{children}</div>
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5">{children}</div>
 
-        {/* Footer */}
         {footer && (
-          <div className="flex items-center justify-end gap-3 p-6 border-t border-border-subtle">
+          <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-border-subtle">
             {footer}
           </div>
         )}
@@ -140,7 +136,7 @@ export function ConfirmModal({
         </>
       }
     >
-      <p className="text-text-muted">{message}</p>
+      <p className="text-[14px] leading-6 text-text-muted">{message}</p>
     </Modal>
   );
 }

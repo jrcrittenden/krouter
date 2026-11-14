@@ -6,6 +6,8 @@ import { useEffect, useState } from "react";
 import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
+import Icon from "../../../../../shared/components/icons/Icon";
+import EmptyState from "@/shared/components/EmptyState";
 
 // Kinds that support combos (currently disabled for image/tts — temporarily hidden).
 // webSearch/webFetch handled by /web page.
@@ -70,7 +72,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) 
               />
             </div>
             <div className="min-w-0">
-              <h3 className="font-semibold text-sm">{provider.name}</h3>
+              <h3 className="section-title">{provider.name}</h3>
               <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                 {isCustom && <Badge variant="default" size="sm">Custom</Badge>}
                 {renderStatus()}
@@ -104,7 +106,7 @@ function ComboList({ combos }) {
         <Link key={combo.id} href={`/dashboard/media-providers/combo/${combo.id}`}>
           <Card padding="xs" className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
+              <Icon name="layers" size={18} className="text-primary" />
               <code className="text-sm font-mono font-medium flex-1 truncate">{combo.name}</code>
               <div className="flex flex-wrap items-center gap-1 sm:shrink-0">
                 {combo.models.slice(0, 6).map((entry, i) => {
@@ -128,7 +130,7 @@ function ComboList({ combos }) {
                 )}
               </div>
               <span className="text-[11px] text-text-muted shrink-0">{combo.models.length}</span>
-              <span className="material-symbols-outlined text-text-muted text-[16px]">chevron_right</span>
+              <Icon name="chevron_right" size={16} className="text-text-muted" />
             </div>
           </Card>
         </Link>
@@ -247,9 +249,10 @@ export default function MediaProviderKindPage() {
       )}
 
       {allProviders.length === 0 ? (
-        <div className="text-center py-12 border border-dashed border-border rounded-xl text-text-muted text-sm">
-          No providers support <strong>{kindConfig.label}</strong> yet.
-        </div>
+        <EmptyState
+          title={<>No providers support <strong>{kindConfig.label}</strong> yet.</>}
+          className="rounded-xl border border-dashed border-border"
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {providers.map((provider) => (
