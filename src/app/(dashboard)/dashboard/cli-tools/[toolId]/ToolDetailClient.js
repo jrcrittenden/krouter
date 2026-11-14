@@ -6,10 +6,11 @@ import { CardSkeleton } from "@/shared/components";
 import { CLI_TOOLS } from "@/shared/constants/cliTools";
 import { getModelsByProviderId, PROVIDER_ID_TO_ALIAS } from "@/shared/constants/models";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import Icon from "../../../../../shared/components/icons/Icon";
 import {
   ClaudeToolCard, CodexToolCard, DroidToolCard, OpenClawToolCard,
   HermesToolCard, DefaultToolCard, OpenCodeToolCard, CoworkToolCard,
-  CopilotToolCard, ClineToolCard, KiloToolCard, DeepSeekTuiToolCard,
+  ClineToolCard, KiloToolCard, DeepSeekTuiToolCard,
   JcodeToolCard,
 } from "../components";
 
@@ -137,8 +138,6 @@ export default function ToolDetailClient({ toolId, machineId }) {
         return <OpenClawToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
       case "hermes":
         return <HermesToolCard {...commonProps} activeProviders={getActiveProviders()} hasActiveProviders={hasActiveProviders} cloudEnabled={cloudEnabled} />;
-      case "copilot":
-        return <CopilotToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
       case "cline":
         return <ClineToolCard {...commonProps} activeProviders={getActiveProviders()} cloudEnabled={cloudEnabled} />;
       case "kilo":
@@ -155,9 +154,9 @@ export default function ToolDetailClient({ toolId, machineId }) {
   // Guard removed/unknown tools (e.g. disabled Cowork) to avoid crash on direct URL.
   if (!tool) {
     return (
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-1 sm:px-0">
+      <div className="flex min-w-0 flex-col gap-6">
         <Link href="/dashboard/cli-tools" className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-primary w-fit">
-          <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+          <Icon name="arrow_back" size={18} />
           Back to CLI Tools
         </Link>
         <p className="text-sm text-text-muted">Tool not found or disabled.</p>
@@ -166,15 +165,10 @@ export default function ToolDetailClient({ toolId, machineId }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 px-1 sm:px-0">
-      <Link href="/dashboard/cli-tools" className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-primary w-fit">
-        <span className="material-symbols-outlined text-[18px]">arrow_back</span>
-        Back to CLI Tools
-      </Link>
-      <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold text-text-main sm:text-2xl">{tool.name}</h1>
-        <p className="text-sm text-text-muted">{tool.description}</p>
-      </div>
+    <div className="flex min-w-0 flex-col gap-6">
+      {/* Title and the trail back to CLI Tools are in the header bar; the
+          card below already carries the tool's name and description, so a
+          page-level copy of either would be the third rendering of it. */}
       {loading ? <CardSkeleton /> : renderToolCard()}
     </div>
   );

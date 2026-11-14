@@ -3,24 +3,6 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Hide icon ligature text until font is ready */
-/* Inside @layer base on purpose. Unlayered rules beat every layered one, so when
-   these lived outside a layer they overrode Tailwind's own utilities (which live in
-   @layer utilities): `opacity-20` and `opacity-50` on an icon stopped dimming it,
-   and the `transition` shorthand reset transition-property to opacity alone, which
-   killed `transition-transform` on every chevron. Layered here, utilities win. */
-@layer base {
-  .material-symbols-outlined { opacity: 0; }
-  .fonts-loaded .material-symbols-outlined {
-    opacity: 1;
-    /* Longhands, not the shorthand: `transition: opacity` would reset
-       transition-property and clobber a utility's own transition. */
-    transition-property: opacity;
-    transition-duration: .12s;
-    transition-timing-function: ease-out;
-  }
-}
-
 /* ============================================================
    kRouter (Kodelyth) palette
    Brand orange (dark) / soft coral (light), neutral warm bases
@@ -99,16 +81,21 @@
   --color-primary: #E56A4A;
   --color-primary-hover: #cc5236;
 
-  /* Surfaces (dark - Claude-like neutral warm) */
+  /* Surfaces (dark). Four planes, deepest first: the nav sits BELOW the canvas
+     and cards sit above it, so depth runs sidebar < bg < surface < surface-2.
+     It used to run the other way — a 0.72-alpha sidebar resolved lighter than
+     the canvas behind it — which left the nav floating over a darker page and
+     cost the cards their lift, because a #262626 card on a ~#222 neighbour has
+     almost nothing to separate it. */
   --color-bg: #1a1a1a;
   --color-bg-alt: #1F1F1E;
-  --color-surface: #262626;
-  --color-surface-2: #303030;
+  --color-surface: #212121;
+  --color-surface-2: #262626;
   --color-surface-3: #3a3a3a;
-  --color-sidebar: rgba(30, 30, 30, 0.85);
+  --color-sidebar: #151514;
 
-  --color-border: #333333;
-  --color-border-subtle: #2a2a2a;
+  --color-border: #2f2f2f;
+  --color-border-subtle: #262626;
 
   --color-text: #ededed;
   --color-text-main: #ededed;
@@ -188,9 +175,9 @@ select {
   --color-bg-light: #FCFBF9;
   --color-bg-dark: #1a1a1a;
   --color-surface-light: #ffffff;
-  --color-surface-dark: #262626;
+  --color-surface-dark: #212121;
   --color-sidebar-light: #F4F1EC;
-  --color-sidebar-dark: #1F1F1E;
+  --color-sidebar-dark: #151514;
   --color-border-light: #e5e7eb;
   --color-border-dark: #333333;
   --color-text-main-light: #0a0a0a;
@@ -213,7 +200,7 @@ select {
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', system-ui, sans-serif;
 
   /* Kodelyth brand display font — Space Grotesk for wordmarks/headers. The
-     --font-space-grotesk variable is set by next/font/google in layout.js;
+     --font-space-grotesk variable is set by next/font/local in layout.js;
      this alias lets components reach it via the Tailwind utility `font-display`. */
   --font-display: var(--font-space-grotesk), 'Space Grotesk', 'Inter', system-ui, sans-serif;
 }
@@ -242,9 +229,50 @@ input, textarea {
   accent-color: var(--color-primary);
 }
 
+/* ============================================================
+   Dashboard shell gutter
+   ============================================================
+   The header bar and the scrolling content area are siblings, and their inner
+   tracks have to resolve to the same left edge. Equal padding is not enough:
+   the content area is a scroll container whose styled scrollbar is 6px of real
+   layout width, so its usable box is 6px narrower than the header's. A centred
+   narrow track then lands 3px left of the header's — measured 459 against 462
+   on /dashboard/profile at 1440px.
+
+   So the content area reserves that 6px whether or not the scrollbar is
+   showing (`scrollbar-gutter: stable`, which also stops the page shifting as
+   content grows past one screen), and the header reserves the same by hand
+   since it never scrolls. Both end up 1102px wide at x=292.
+
+   Consumed through src/shared/constants/pageShell.js — nothing should spell
+   these values out again. */
+:root {
+  --shell-gutter: 1.5rem;
+  --shell-scrollbar: 6px;
+}
+@media (min-width: 1024px) {
+  :root {
+    --shell-gutter: 2.5rem;
+  }
+}
+
+.shell-gutter-x {
+  padding-inline: var(--shell-gutter);
+}
+
+.shell-gutter-x-header {
+  padding-inline-start: var(--shell-gutter);
+  padding-inline-end: calc(var(--shell-gutter) + var(--shell-scrollbar));
+}
+
+.shell-scroll {
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
 /* Scrollbar (custom-scrollbar utility kept for compat) */
 .custom-scrollbar::-webkit-scrollbar {
-  width: 6px;
+  width: var(--shell-scrollbar, 6px);
 }
 .custom-scrollbar::-webkit-scrollbar-track {
   background: transparent;
@@ -292,6 +320,81 @@ input, textarea {
   background: linear-gradient(180deg, var(--color-bg-alt) 0%, var(--color-bg) 100%);
 }
 
+/* ============================================================
+   Section headings
+
+   A card's heading was written twenty different ways across the pages —
+   text-lg/text-base/text-sm crossed with font-semibold/font-medium, some with
+   a colour and some without — so two cards side by side announced themselves
+   at different weights for no reason. One class, matching the canvas: 15px
+   display face, 600.
+   ============================================================ */
+@layer components {
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 15px;
+    line-height: 1.35;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    color: var(--color-text-main);
+  }
+}
+
+/* ============================================================
+   Data tables
+
+   Eight tables were written by hand with eight different paddings —
+   px-3/py-2, px-6/py-3, p-4, py-1.5 — and headers that were variously
+   semibold-main, uppercase-muted, or unstyled. Putting the treatment here
+   rather than on every cell is what makes a table on Usage look like a table
+   on PXPIPE.
+
+   In @layer components, so a utility on a specific cell still wins when a
+   table genuinely needs to differ.
+   ============================================================ */
+@layer components {
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    text-align: left;
+  }
+  .data-table thead th {
+    padding: 9px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+    background: var(--color-bg-alt);
+    border-bottom: 1px solid var(--color-border-subtle);
+    white-space: nowrap;
+  }
+  .data-table tbody td {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--color-border-subtle);
+    vertical-align: middle;
+  }
+  .data-table tbody tr:last-child td { border-bottom: 0; }
+  .data-table tbody tr { transition: background-color .12s ease-out; }
+  .data-table tbody tr:hover { background: var(--color-surface-2); }
+
+  /* Numbers line up only if they share a column width and an alignment; a
+     right-aligned proportional figure still jitters row to row. */
+  .data-table .num,
+  .data-table th.num,
+  .data-table td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .data-table .data-table-empty td {
+    padding: 36px 16px;
+    text-align: center;
+    color: var(--color-text-muted);
+  }
+  .data-table .data-table-empty:hover { background: transparent; }
+}
+
 /* macOS Vibrancy */
 .bg-vibrancy {
   backdrop-filter: blur(20px);
@@ -299,7 +402,11 @@ input, textarea {
   background: rgba(255, 255, 255, 0.72);
 }
 .dark .bg-vibrancy {
-  background: rgba(38, 38, 38, 0.72);
+  /* Was rgba(38,38,38,.72), which composites to roughly #222 over the canvas —
+     lighter than the page it borders. Deeper than the canvas, and opaque, so
+     the nav is one flat plane rather than a blurred sample of the content
+     scrolling behind it. */
+  background: #151514;
 }
 
 /* macOS Traffic Lights */
@@ -316,27 +423,6 @@ input, textarea {
 .traffic-light.yellow { background: #FFBD2E; }
 .traffic-light.green { background: #27C93F; }
 
-/* Material Symbols */
-.material-symbols-outlined {
-  font-family: 'Material Symbols Outlined', sans-serif;
-  font-weight: normal;
-  font-style: normal;
-  font-size: 24px;
-  line-height: 1;
-  letter-spacing: normal;
-  text-transform: none;
-  display: inline-block;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  font-feature-settings: 'liga';
-  -webkit-font-feature-settings: 'liga';
-  -webkit-font-smoothing: antialiased;
-  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-}
-.material-symbols-outlined.fill-1 {
-  font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
-}
 
 /* Disable text selection on buttons */
 button {

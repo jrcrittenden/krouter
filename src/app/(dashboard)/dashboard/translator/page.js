@@ -5,6 +5,8 @@ import { Card, Button } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import dynamic from "next/dynamic";
 import { MONACO_VS_PATH } from "@/shared/constants/monaco";
+import Icon from "../../../../shared/components/icons/Icon";
+import HeaderActions from "@/shared/components/HeaderActions";
 
 // Configure the loader inside the dynamic import so the editor stays lazy-loaded and the
 // browser fetches the pinned Monaco build instead of the loader's hardcoded 0.55.1.
@@ -220,23 +222,20 @@ export default function TranslatorPage() {
   };
 
   return (
-    <div className="p-8 space-y-3">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        <div>
-          <h1 className="text-2xl font-bold text-text-main">Translator Debug</h1>
-          <p className="text-sm text-text-muted mt-1">Replay request flow — matches log files</p>
-        </div>
+    <div className="space-y-3">
+      {/* Title and description come from the header bar. The meta badges are
+          page state, so they ride up into its actions slot. */}
+      <HeaderActions>
         {meta && (
-          <div className="flex items-center gap-2 flex-wrap justify-end">
+          <div className="hidden items-center gap-2 lg:flex">
             <MetaBadge label="src" value={meta.sourceFormat} color="blue" />
-            <span className="material-symbols-outlined text-text-muted text-[14px]">arrow_forward</span>
+            <Icon name="arrow_forward" size={14} className="text-text-muted" />
             <MetaBadge label="dst" value={meta.targetFormat} color="orange" />
             <MetaBadge label="provider" value={meta.provider} color="green" />
             <MetaBadge label="model" value={meta.model} color="purple" />
           </div>
         )}
-      </div>
+      </HeaderActions>
 
       {STEPS.map((step) => {
         const action = getAction(step.id);
@@ -249,11 +248,9 @@ export default function TranslatorPage() {
               {/* Step header */}
               <div className="flex items-center justify-between">
                 <button onClick={() => toggle(step.id)} className="flex items-center gap-2 flex-1 text-left group">
-                  <span className="material-symbols-outlined text-[20px] text-text-muted group-hover:text-primary transition-colors">
-                    {isExpanded ? "expand_more" : "chevron_right"}
-                  </span>
+                  <Icon name={isExpanded ? "expand_more" : "chevron_right"} size={20} className="text-text-muted group-hover:text-primary transition-colors" />
                   <span className="text-xs font-mono text-text-muted w-4">{step.id}</span>
-                  <h3 className="text-sm font-semibold text-text-main">{step.label}</h3>
+                  <h3 className="section-title">{step.label}</h3>
                   <span className="text-xs text-text-muted font-mono">{step.file}</span>
                   {content && <span className="text-xs text-green-500">({content.length} chars)</span>}
                 </button>

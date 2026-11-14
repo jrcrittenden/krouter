@@ -1,10 +1,8 @@
 "use client";
 
 import { useParams, notFound, useRouter } from "next/navigation";
-import Link from "next/link";
 import { useState, useEffect } from "react";
 import { Card, Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard } from "@/shared/components";
-import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProviderAlias, isCustomEmbeddingProvider, resolveProviderId } from "@/shared/constants/providers";
 import { getModelsByProviderId } from "@/shared/constants/models";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
@@ -13,6 +11,8 @@ import ModelsCard from "@/app/(dashboard)/dashboard/providers/components/ModelsC
 import { TTS_PROVIDER_CONFIG } from "@/shared/constants/ttsProviders";
 import { getTtsVoicesForModel } from "open-sse/config/ttsModels.js";
 import { GOOGLE_TTS_LANGUAGES } from "open-sse/config/googleTtsLanguages.js";
+import Icon from "../../../../../../shared/components/icons/Icon";
+import useDialog from "@/shared/hooks/useDialog";
 
 // Shared row layout — defined outside components to avoid re-mount on re-render
 function Row({ label, children }) {
@@ -218,7 +218,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold mb-4">Example</h2>
+      <h2 className="section-title mb-4">Example</h2>
 
       <div className="flex flex-col gap-2.5">
         {/* Model — text input for custom node, dropdown otherwise */}
@@ -261,7 +261,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
                   useTunnel ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"
                 }`}
               >
-                <span className="material-symbols-outlined text-[14px]">wifi_tethering</span>
+                <Icon name="wifi_tethering" size={14} />
                 Tunnel
               </button>
             )}
@@ -293,7 +293,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
                 onClick={() => setInput("")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">close</span>
+                <Icon name="close" size={14} />
               </button>
             )}
           </div>
@@ -320,7 +320,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
                 onClick={() => copyCurl(curlSnippet)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedCurl ? "check" : "content_copy"}</span>
+                <Icon name={copiedCurl ? "check" : "content_copy"} size={14} />
                 {copiedCurl ? "Copied" : "Copy"}
               </button>
               <button
@@ -328,9 +328,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
                 disabled={running || !input.trim() || !modelFull}
                 className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-                  play_arrow
-                </span>
+                <Icon name="play_arrow" size={14} style={running ? { animation: "spin 1s linear infinite" } : undefined} />
                 {running ? "Running..." : "Run"}
               </button>
             </div>
@@ -352,7 +350,7 @@ function EmbeddingExampleCard({ providerId, customAlias }) {
                 onClick={() => copyRes(resultJson)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedRes ? "check" : "content_copy"}</span>
+                <Icon name={copiedRes ? "check" : "content_copy"} size={14} />
                 {copiedRes ? "Copied" : "Copy"}
               </button>
             )}
@@ -404,6 +402,7 @@ function TtsExampleCard({ providerId }) {
 
   // Country picker modal state
   const [modalOpen, setModalOpen]           = useState(false);
+  const pickerDialog = useDialog({ isOpen: modalOpen, onClose: () => setModalOpen(false) });
   const [languages, setLanguages]           = useState([]);
   const [modalLoading, setModalLoading]     = useState(false);
   const [modalSearch, setModalSearch]       = useState("");
@@ -584,7 +583,7 @@ function TtsExampleCard({ providerId }) {
   return (
     <>
       <Card>
-        <h2 className="text-lg font-semibold mb-4">Example</h2>
+        <h2 className="section-title mb-4">Example</h2>
 
         <div className="flex flex-col gap-2.5">
           {/* Endpoint + API Key as read-only text */}
@@ -601,7 +600,7 @@ function TtsExampleCard({ providerId }) {
                     useTunnel ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"
                   }`}
                 >
-                  <span className="material-symbols-outlined text-[14px]">wifi_tethering</span>
+                  <Icon name="wifi_tethering" size={14} />
                   Tunnel
                 </button>
               )}
@@ -662,7 +661,7 @@ function TtsExampleCard({ providerId }) {
                   onClick={openModal}
                   className="flex w-full items-center justify-center gap-1 text-xs px-2.5 py-1.5 rounded-lg border border-border text-text-muted hover:text-primary hover:border-primary/40 transition-colors sm:w-auto sm:shrink-0"
                 >
-                  <span className="material-symbols-outlined text-[14px]">language</span>
+                  <Icon name="language" size={14} />
                   Select language
                 </button>
               </div>
@@ -720,7 +719,7 @@ function TtsExampleCard({ providerId }) {
                       onClick={() => { setVoiceId(""); setSelectedVoice(""); }}
                       className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
                     >
-                      <span className="material-symbols-outlined text-[14px]">close</span>
+                      <Icon name="close" size={14} />
                     </button>
                   )}
                 </div>
@@ -761,7 +760,7 @@ function TtsExampleCard({ providerId }) {
                   onClick={() => setInput("")}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[14px]">close</span>
+                  <Icon name="close" size={14} />
                 </button>
               )}
             </div>
@@ -788,7 +787,7 @@ function TtsExampleCard({ providerId }) {
                   onClick={() => copyCurl(curlSnippet)}
                   className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[14px]">{copiedCurl ? "check" : "content_copy"}</span>
+                  <Icon name={copiedCurl ? "check" : "content_copy"} size={14} />
                   {copiedCurl ? "Copied" : "Copy"}
                 </button>
                 <button
@@ -796,9 +795,7 @@ function TtsExampleCard({ providerId }) {
                   disabled={running || !input.trim() || !modelFull}
                   className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-                    play_arrow
-                  </span>
+                  <Icon name="play_arrow" size={14} style={running ? { animation: "spin 1s linear infinite" } : undefined} />
                   {running ? "Generating..." : "Run"}
                 </button>
               </div>
@@ -816,7 +813,7 @@ function TtsExampleCard({ providerId }) {
                   Response {latency && <span className="font-normal normal-case">&#9889; {latency}ms</span>}
                 </span>
                 <a href={audioUrl} download="speech.mp3" className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors">
-                  <span className="material-symbols-outlined text-[14px]">download</span>
+                  <Icon name="download" size={14} />
                   Download
                 </a>
               </div>
@@ -854,15 +851,16 @@ function TtsExampleCard({ providerId }) {
           onClick={() => setModalOpen(false)}
         >
           <div
-            className="border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[80vh]"
+            {...pickerDialog.panelProps}
+            className="border border-border rounded-xl shadow-2xl w-full max-w-md mx-4 flex flex-col max-h-[80vh] outline-none"
             style={{ backgroundColor: "var(--color-bg)", isolation: "isolate" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0 rounded-t-xl">
-              <h3 className="text-sm font-semibold">Select Language</h3>
+              <h3 id={pickerDialog.titleId} className="section-title">Select Language</h3>
               <button onClick={() => setModalOpen(false)} className="text-text-muted hover:text-primary transition-colors">
-                <span className="material-symbols-outlined text-[20px]">close</span>
+                <Icon name="close" size={20} />
               </button>
             </div>
 
@@ -896,7 +894,7 @@ function TtsExampleCard({ providerId }) {
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs text-text-muted">{c.voices.length} voices</span>
                         {selectedLang === c.code && (
-                          <span className="material-symbols-outlined text-[16px] text-primary">check</span>
+                          <Icon name="check" size={16} className="text-primary" />
                         )}
                       </div>
                     </button>
@@ -1112,7 +1110,7 @@ function GenericExampleCard({ providerId, kind }) {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold mb-4">Example</h2>
+      <h2 className="section-title mb-4">Example</h2>
       <div className="flex flex-col gap-2.5">
         {/* Model selector — dropdown if presets exist, else manual input for media kinds */}
         {kindModels.length > 0 ? (
@@ -1152,7 +1150,7 @@ function GenericExampleCard({ providerId, kind }) {
                   useTunnel ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"
                 }`}
               >
-                <span className="material-symbols-outlined text-[14px]">wifi_tethering</span>
+                <Icon name="wifi_tethering" size={14} />
                 Tunnel
               </button>
             )}
@@ -1203,7 +1201,7 @@ function GenericExampleCard({ providerId, kind }) {
                 onClick={() => setInput("")}
                 className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">close</span>
+                <Icon name="close" size={14} />
               </button>
             )}
           </div>
@@ -1226,7 +1224,7 @@ function GenericExampleCard({ providerId, kind }) {
                     onClick={() => setRefImage("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[14px]">close</span>
+                    <Icon name="close" size={14} />
                   </button>
                 )}
               </div>
@@ -1259,7 +1257,7 @@ function GenericExampleCard({ providerId, kind }) {
                     onClick={() => setMaskImage("")}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-text-muted hover:text-primary transition-colors"
                   >
-                    <span className="material-symbols-outlined text-[14px]">close</span>
+                    <Icon name="close" size={14} />
                   </button>
                 )}
               </div>
@@ -1335,7 +1333,7 @@ function GenericExampleCard({ providerId, kind }) {
                 onClick={() => copyCurl(curlSnippet)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedCurl ? "check" : "content_copy"}</span>
+                <Icon name={copiedCurl ? "check" : "content_copy"} size={14} />
                 {copiedCurl ? "Copied" : "Copy"}
               </button>
             <button
@@ -1343,9 +1341,7 @@ function GenericExampleCard({ providerId, kind }) {
               disabled={running || !input.trim() || !modelFull}
               className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-                <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-                  play_arrow
-                </span>
+                <Icon name="play_arrow" size={14} style={running ? { animation: "spin 1s linear infinite" } : undefined} />
                 {running ? "Running..." : "Run"}
               </button>
             </div>
@@ -1356,9 +1352,7 @@ function GenericExampleCard({ providerId, kind }) {
         {/* Streaming progress */}
         {(running || progress) && useStreaming && (
           <div className="flex flex-col gap-2 px-3 py-2 rounded-lg bg-sidebar border border-border sm:flex-row sm:items-center sm:gap-3">
-            <span className="material-symbols-outlined text-[16px] text-primary" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-              {running ? "progress_activity" : "check_circle"}
-            </span>
+            <Icon name={running ? "progress_activity" : "check_circle"} size={16} className="text-primary" style={running ? { animation: "spin 1s linear infinite" } : undefined} />
             <span className="text-xs text-text-muted">
               {progress?.stage || "starting"}
               {!running && progress?.bytesReceived ? ` · ${(progress.bytesReceived / 1024).toFixed(1)} KB` : ""}
@@ -1392,7 +1386,7 @@ function GenericExampleCard({ providerId, kind }) {
                 onClick={() => copyRes(resultJson)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedRes ? "check" : "content_copy"}</span>
+                <Icon name={copiedRes ? "check" : "content_copy"} size={14} />
                 {copiedRes ? "Copied" : "Copy"}
               </button>
             )}
@@ -1408,7 +1402,7 @@ function GenericExampleCard({ providerId, kind }) {
                   download="image.png"
                   className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
                 >
-                  <span className="material-symbols-outlined text-[14px]">download</span>
+                  <Icon name="download" size={14} />
                   Download
                 </a>
               </div>
@@ -1525,7 +1519,7 @@ function SttExampleCard({ providerId }) {
 
   return (
     <Card>
-      <h2 className="text-lg font-semibold mb-4">Example</h2>
+      <h2 className="section-title mb-4">Example</h2>
       <div className="flex flex-col gap-2.5">
         {/* Model */}
         {sttModels.length > 0 ? (
@@ -1565,7 +1559,7 @@ function SttExampleCard({ providerId }) {
                   useTunnel ? "border-primary/40 bg-primary/10 text-primary" : "border-border text-text-muted hover:text-primary"
                 }`}
               >
-                <span className="material-symbols-outlined text-[14px]">wifi_tethering</span>
+                <Icon name="wifi_tethering" size={14} />
                 Tunnel
               </button>
             )}
@@ -1662,7 +1656,7 @@ function SttExampleCard({ providerId }) {
                 onClick={() => copyCurl(curlSnippet)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedCurl ? "check" : "content_copy"}</span>
+                <Icon name={copiedCurl ? "check" : "content_copy"} size={14} />
                 {copiedCurl ? "Copied" : "Copy"}
               </button>
               <button
@@ -1670,9 +1664,7 @@ function SttExampleCard({ providerId }) {
                 disabled={running || !audioFile || !modelFull}
                 className="flex w-full sm:w-auto items-center justify-center gap-1.5 px-3 py-1 rounded-lg bg-primary text-white text-xs font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <span className="material-symbols-outlined text-[14px]" style={running ? { animation: "spin 1s linear infinite" } : undefined}>
-                  play_arrow
-                </span>
+                <Icon name="play_arrow" size={14} style={running ? { animation: "spin 1s linear infinite" } : undefined} />
                 {running ? "Transcribing..." : "Run"}
               </button>
             </div>
@@ -1693,7 +1685,7 @@ function SttExampleCard({ providerId }) {
                 onClick={() => copyRes(resultStr)}
                 className="inline-flex items-center gap-1 text-xs text-text-muted hover:text-primary transition-colors"
               >
-                <span className="material-symbols-outlined text-[14px]">{copiedRes ? "check" : "content_copy"}</span>
+                <Icon name={copiedRes ? "check" : "content_copy"} size={14} />
                 {copiedRes ? "Copied" : "Copy"}
               </button>
             )}
@@ -1762,32 +1754,13 @@ export default function MediaProviderDetailPage() {
   if (!isCustom && !kinds.includes(kind)) return notFound();
 
   return (
-    <div className="flex flex-col gap-8">
-      {/* Back */}
+    <div className="flex flex-col gap-6">
+      {/* The name, icon and the trail back to this kind are all in the header
+          bar's breadcrumb. What is left is the provider's own metadata. */}
       <div>
-        <Link
-          href={`/dashboard/media-providers/${kind}`}
-          className="inline-flex items-center gap-1 text-sm text-text-muted hover:text-primary transition-colors mb-4"
-        >
-          <span className="material-symbols-outlined text-lg">arrow_back</span>
-          {kindConfig.label}
-        </Link>
-
-        {/* Header */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
-          <div className="size-12 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: `${provider.color}15` }}>
-            <ProviderIcon
-              src={`/providers/${provider.id}.png`}
-              alt={provider.name}
-              size={48}
-              className="object-contain rounded-lg max-w-[48px] max-h-[48px]"
-              fallbackText={provider.textIcon || provider.id.slice(0, 2).toUpperCase()}
-              fallbackColor={provider.color}
-            />
-          </div>
           <div className="flex-1">
             <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h1 className="text-3xl font-semibold tracking-tight">{provider.name}</h1>
               {!isCustom && provider.notice?.apiKeyUrl && (
                 <a
                   href={provider.notice.apiKeyUrl}
@@ -1795,7 +1768,7 @@ export default function MediaProviderDetailPage() {
                   rel="noopener noreferrer"
                   className="text-xs text-primary hover:underline inline-flex items-center gap-1"
                 >
-                  <span className="material-symbols-outlined text-sm">open_in_new</span>
+                  <Icon name="open_in_new" size={14} />
                   Get API Key
                 </a>
               )}
@@ -1825,7 +1798,7 @@ export default function MediaProviderDetailPage() {
       {/* Kind-specific notice (e.g. codex/image requires Plus) */}
       {!isCustom && provider.kindNotice?.[kind] && (
         <div className="flex items-start gap-3 px-4 py-3 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-700 dark:text-amber-400">
-          <span className="material-symbols-outlined text-[20px] mt-0.5">warning</span>
+          <Icon name="warning" size={20} className="mt-0.5" />
           <p className="text-sm">{provider.kindNotice[kind]}</p>
         </div>
       )}
@@ -1833,7 +1806,7 @@ export default function MediaProviderDetailPage() {
       {/* Provider notice text (only when there's actual text content) */}
       {!isCustom && provider.notice?.text && !provider.deprecated && (
         <div className="flex flex-col gap-2 rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 sm:flex-row sm:items-center">
-          <span className="material-symbols-outlined text-[16px] text-blue-500 shrink-0">info</span>
+          <Icon name="info" size={16} className="text-blue-500 shrink-0" />
           <p className="min-w-0 flex-1 text-xs leading-relaxed text-blue-600 dark:text-blue-400">{provider.notice.text}</p>
           {provider.notice.apiKeyUrl && (
             <a

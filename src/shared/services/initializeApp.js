@@ -13,7 +13,7 @@ import {
   RESTART_COOLDOWN_MS, NETWORK_SETTLE_MS,
   WATCHDOG_INTERVAL_MS, NETWORK_CHECK_INTERVAL_MS, VIRTUAL_IFACE_REGEX,
 } from "@/lib/tunnel";
-import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync, removeAllDNSEntries } from "@/mitm/manager";
+import { getMitmStatus, startMitm, loadEncryptedPassword, initDbHooks, restoreToolDNS, removeAllDNSEntriesSync, removeAllDNSEntries, getProxyCaptureStatus, startProxyCapture } from "@/mitm/manager";
 import { TOOL_HOSTS } from "@/mitm/dns/dnsConfig";
 import { startQuotaAutoPing } from "@/shared/services/quotaAutoPing";
 import { consumeMitmRecoveryMarker } from "@/shared/services/mitmRecovery";
@@ -50,6 +50,7 @@ const g = global.__appSingleton ??= {
   lastWatchdogTick: Date.now(),
   lastOnline: null,
   mitmStartInProgress: false,
+  proxyStartInProgress: false,
   tunnelAutoResumed: false,
   tailscaleAutoResumed: false,
 };
@@ -98,6 +99,10 @@ export async function initializeApp() {
     startWatchdog();
     startNetworkMonitor();
     autoStartMitm();
+    // Separate from autoStartMitm on purpose: the two capture transports are
+    // independent. Proxy capture needs no password, touches no system state and
+    // is useful on its own, so it must not sit behind `mitmEnabled`.
+    autoStartProxyCapture();
     // 0.5.113 (upstream 27b37705) — don't spin up the auto-ping scheduler's
     // recurring interval unless a connection actually opted in. On a fresh
     // install (nothing enabled) this was a pure no-op timer every 60s.
@@ -166,6 +171,54 @@ async function autoBackfillTokensIfNeeded() {
   if (updated > 0) console.log(`[InitApp] Token backfill: lifted real Gemini token counts into ${updated} historical rows`);
 }
 
+/**
+ * Bring proxy capture back if it was on.
+ *
+ * It had no auto-start at all. The only reason a long-lived proxy appeared to
+ * survive restarts is that it is spawned detached and unref'd, so it outlives
+ * the app and gets reparented to launchd — one still running here had been up
+ * since a session months earlier. Kill it once and it stayed dead, silently,
+ * because nothing recorded that it had been enabled.
+ *
+ * Nothing here is privileged: no sudo, no hosts file, no port 443. A failure is
+ * therefore a plain log line, not a state anything has to heal.
+ */
+async function autoStartProxyCapture() {
+  if (g.proxyStartInProgress) return;
+  g.proxyStartInProgress = true;
+  try {
+    const settings = await getSettings();
+    const status = await getProxyCaptureStatus();
+
+    // Upgrade path: a proxy running from before this setting existed is proof
+    // the user turned it on, so adopt it rather than making them press the
+    // button again to become restartable.
+    if (settings.proxyCaptureEnabled === undefined) {
+      if (!status.running) return;
+      // The port is already accepting, so this takes startProxyCapture's
+      // already-running path: it records the intent and spawns nothing, which
+      // is why passing no key here is safe.
+      await startProxyCapture("");
+      console.log("[InitApp] Proxy capture was already running — recorded so it restarts on the next boot");
+      return;
+    }
+
+    if (!settings.proxyCaptureEnabled) return;
+    if (status.running) return;
+
+    const keys = await getApiKeys();
+    const activeKey = keys.find((k) => k.isActive !== false);
+
+    console.log("[InitApp] Proxy capture was enabled, auto-starting...");
+    const started = await startProxyCapture(activeKey?.key || "sk_krouter");
+    console.log(`[InitApp] Proxy capture auto-started on ${started.proxyUrl}`);
+  } catch (e) {
+    console.log("[InitApp] Proxy capture auto-start failed:", e.message);
+  } finally {
+    g.proxyStartInProgress = false;
+  }
+}
+
 async function autoStartMitm() {
   if (g.mitmStartInProgress) return;
   g.mitmStartInProgress = true;
@@ -190,7 +243,14 @@ async function autoStartMitm() {
       // successful return proves NOTHING — /etc/hosts edits need root and quietly
       // no-op when sudo is password-gated. VERIFY by re-reading the DNS state and
       // only claim success when the redirects are actually gone.
-      try { await removeAllDNSEntries(); } catch { /* verified below */ }
+      // 0.5.171 — pass the stored sudo password. Without it this call needs a
+      // passwordless sudo, which most machines do not have, so the "cleanup" was a
+      // no-op on exactly the machines that get stuck: the entries stayed, every one
+      // of those hosts kept resolving to 127.0.0.1 with nothing listening, and the
+      // user was told to run a sed command by hand. The password is already on disk
+      // (the same one that started MITM in the first place).
+      const healPwd = await loadEncryptedPassword().catch(() => null);
+      try { await removeAllDNSEntries(healPwd || undefined); } catch { /* verified below */ }
       const after = await getMitmStatus();
       if (!after.staleDns) {
         console.warn("[InitApp] ✓ Stale MITM DNS entries removed — provider traffic restored.");
@@ -339,6 +399,41 @@ async function safeRestartTailscale(reason) {
   }
 }
 
+// ─── Stale MITM DNS: the blackhole that outlives the server ──────────────────
+//
+// 0.5.171 — the DNS redirects are what make MITM work, and they are also what breaks
+// the machine when the server is not there to answer them. A clean stop removes them
+// (server.js shutdown -> removeAllDNSEntriesSync, which can do it because the server
+// runs as root). A SIGKILL, a crash, a force-quit or a power cut does not, and then
+// every redirected host resolves to 127.0.0.1 with nothing on :443. Reproduced:
+//
+//   kill -9 <mitm pid>
+//   :443 listener        0
+//   hosts entries left   5
+//   curl daily-cloudcode-pa.googleapis.com -> Couldn't connect to server
+//   curl runtime.us-east-1.kiro.dev        -> Couldn't connect to server
+//
+// Until now the only repair ran at app startup, so a crash meant no provider traffic
+// until the user noticed and restarted kRouter. This runs it on the watchdog tick as
+// well, so the window is one tick instead of unbounded.
+async function healStaleMitmDns(where) {
+  const status = await getMitmStatus();
+  if (status.running || !status.staleDns) return false;
+  console.warn(
+    `[${where}] MITM is down but DNS redirects are still active for: ${status.staleDnsTools.join(", ")}. ` +
+    "Those hosts resolve to 127.0.0.1 with nothing listening — removing the redirects.",
+  );
+  const pwd = await loadEncryptedPassword().catch(() => null);
+  try { await removeAllDNSEntries(pwd || undefined); } catch { /* verified below */ }
+  const after = await getMitmStatus();
+  if (after.staleDns) {
+    console.warn(`[${where}] Could NOT remove them (needs root): ${after.staleDnsTools.join(", ")}`);
+    return false;
+  }
+  console.warn(`[${where}] Stale MITM DNS removed — provider traffic restored.`);
+  return true;
+}
+
 // ─── Watchdog: 60s tick check both services ──────────────────────────────────
 
 function startWatchdog() {
@@ -346,6 +441,7 @@ function startWatchdog() {
   g.watchdogInterval = setInterval(() => {
     safeRestartTunnel("watchdog").catch(() => {});
     safeRestartTailscale("watchdog").catch(() => {});
+    healStaleMitmDns("watchdog").catch(() => {});
   }, WATCHDOG_INTERVAL_MS);
   if (g.watchdogInterval.unref) g.watchdogInterval.unref();
 }

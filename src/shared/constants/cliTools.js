@@ -1,6 +1,11 @@
 // MITM Tools — IDE tools intercepted via MITM proxy
 export const MITM_TOOLS = {
   antigravity: {
+    // 0.5.175 — Proxy mode cannot help here either, for a second independent
+    // reason: ~/.gemini/bin/agy (Go, boringcrypto) contains zero references to
+    // HTTPS_PROXY, HTTP_PROXY, ALL_PROXY or ProxyFromEnvironment, so it would never
+    // send the CONNECT -- on top of already rejecting the kRouter CA.
+    captureModes: ["dns"],
     id: "antigravity",
     name: "Antigravity",
     image: "/providers/antigravity.png",
@@ -8,6 +13,24 @@ export const MITM_TOOLS = {
     description: "Google Antigravity IDE with MITM",
     configType: "mitm",
     mitmDomain: "daily-cloudcode-pa.googleapis.com",
+    // 0.5.179 — chat IS intercepted. The long-standing claim here, that agy
+    // "builds its own root pool ... and reads no TLS, CA or proxy environment
+    // variables, so it rejects the kRouter CA however the machine is
+    // configured", was wrong. agy honours SSL_CERT_FILE, and SSL_CERT_FILE
+    // REPLACES the system trust store rather than adding to it -- so a certifi
+    // bundle exported from the user's shell hid the System keychain, where the
+    // kRouter CA was trusted all along. Every call failed to verify, which read
+    // as pinning. Claude Code and Kiro are Node, read NODE_EXTRA_CA_CERTS which
+    // kRouter does set, and were never affected; that asymmetry is what made
+    // this one tool look impossible.
+    //
+    // src/mitm/goCaCerts.js now writes a bundle of the system roots plus the
+    // kRouter CA and points SSL_CERT_FILE at it, so this works without the user
+    // editing a shell profile by hand. Measured end to end: the IDE's chat
+    // reaches kRouter, routes to a provider, and returns a real answer.
+    //
+    // The ag/ PROVIDER is unaffected — this is the IDE-via-MITM path.
+    mitmLimitation: "",
     // 0.5.166 — Google retired the 3.5 Flash tiers, gemini-3-flash-agent and the
     // gemini-3-flash command model (upstream 24034f69). The mandatory Default slot
     // pointed at gemini-3.5-flash-low, so a fresh MITM setup mapped the IDE's
@@ -40,33 +63,23 @@ export const MITM_TOOLS = {
       { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", alias: "gpt-oss-120b-medium" },
     ],
   },
-  copilot: {
-    id: "copilot",
-    name: "GitHub Copilot",
-    image: "/providers/copilot.png",
-    color: "#1F6FEB",
-    description: "GitHub Copilot IDE with MITM",
-    configType: "mitm",
-    mitmDomain: "api.individual.githubcopilot.com",
-    modelAliases: ["gpt-5-mini", "gpt-5.4-nano", "claude-haiku-4.5", "gpt-4o", "gpt-4.1"],
-    defaultModels: [
-      // Verified via live MITM passthrough capture of the GitHub Copilot CLI: its model
-      // picker offers "GPT-5 mini" (default → wire id "gpt-5-mini"), "Claude Haiku 4.5"
-      // ("claude-haiku-4.5") and "Auto". "Auto" is NOT a wire id — Copilot dispatches
-      // concrete models dynamically (observed "gpt-5.4-nano" for light tasks and
-      // "claude-haiku-4.5"), so it needs no slot of its own. Without a slot for
-      // gpt-5-mini / gpt-5.4-nano, getMappedModel returns null and the /chat/completions
-      // call is passed through to GitHub Copilot instead of the configured provider —
-      // and gpt-5-mini is the CLI default, so the primary turn leaks (same class as the
-      // Kiro "auto" misrouting). gpt-4o / gpt-4.1 are kept for the VS Code Copilot Chat picker.
-      { id: "gpt-5-mini", name: "GPT-5 mini", alias: "gpt-5-mini" },
-      { id: "gpt-5.4-nano", name: "GPT-5.4 nano", alias: "gpt-5.4-nano" },
-      { id: "claude-haiku-4.5", name: "Claude Haiku 4.5", alias: "claude-haiku-4.5" },
-      { id: "gpt-4o", name: "GPT-4o", alias: "gpt-4o" },
-      { id: "gpt-4.1", name: "GPT-4.1", alias: "gpt-4.1" },
-    ],
-  },
   kiro: {
+    // 0.5.175 — Half proven, so "proxy" is deliberately NOT listed yet.
+    //
+    // Proven: the proxy handles Kiro's own protocol. A real Kiro 1.4.154 request
+    // (POST /v1/responses to runtime.us-east-1.kiro.dev, user-agent KiroIDE
+    // 1.4.154, model "auto") replayed through the proxy got our leaf for that
+    // hostname (CN runtime.us-east-1.kiro.dev, issuer 9Router MITM Root CA),
+    // HTTP 200, `[proxy intercept] kiro auto -> cc/claude-fable-5-1`, and the
+    // model echoed the marker back -- with a deliberately invalid bearer token,
+    // so it never reached AWS.
+    //
+    // Not proven: that the Kiro client itself routes through a proxy. Kiro is a
+    // VS Code fork and its out/main.js references HTTPS_PROXY, --proxy-server and
+    // @vscode/proxy-agent, so it is expected to; it was running during this work
+    // and was not restarted, which is what confirming it needs. List "proxy" once
+    // a chat sent from the Kiro UI has been seen in the proxy log.
+    captureModes: ["dns"],
     id: "kiro",
     name: "Kiro",
     image: "/providers/kiro.png",
@@ -90,6 +103,26 @@ export const MITM_TOOLS = {
     ],
   },
   claude: {
+    // 0.5.175 — Proxy mode verified with the REAL client, not a crafted request.
+    // `HTTPS_PROXY=http://127.0.0.1:20129 claude -p "..." --model claude-opus-5`
+    // answered correctly, and the proxy log shows it sent everything through us:
+    // 15 non-chat calls passed through untouched (claude_cli/bootstrap, mcp-registry,
+    // oauth/account/settings, event_logging/v2/batch) and exactly one intercepted --
+    // `[proxy intercept] claude claude-opus-5 -> cc/claude-fable-5`. That split is
+    // the design working: only the chat is rerouted, telemetry and auth are not.
+    //
+    // Needs no sudo and no /etc/hosts, so unlike the DNS transport it cannot leave
+    // api.anthropic.com unreachable for the whole machine.
+    //
+    // The Claude Desktop GUI's own chat -- a separate path from the agent-sdk CLI
+    // above -- was then verified too: relaunched with HTTPS_PROXY set, its traffic
+    // identifies itself (claude_cli/bootstrap?entrypoint=claude-desktop, plus the
+    // Desktop-only /api/artifacts/mcp and /api/directory/plugins), chats were
+    // intercepted (claude-opus-5 -> mapped; claude-haiku-5-5, the title model,
+    // -> mapped) and telemetry/OAuth passed through untouched. On launch the
+    // Desktop fans out ~100 near-simultaneous calls (one per conversation), which
+    // is why the intercept log line carries the request path.
+    captureModes: ["dns", "proxy"],
     id: "claude",
     name: "Claude Desktop",
     image: "/providers/claude.png",
@@ -97,7 +130,18 @@ export const MITM_TOOLS = {
     description: "Anthropic Claude Desktop app (Electron). Intercepts api.anthropic.com so the desktop app routes through kRouter to whichever provider you've mapped (your Claude OAuth, Antigravity, etc.). The Claude Code CLI does NOT need this — use ANTHROPIC_BASE_URL instead.",
     configType: "mitm",
     mitmDomain: "api.anthropic.com",
+    // 0.5.169 — the list stopped at Opus 4.7 while the Antigravity tool moved to the
+    // 5.5 family in 0.5.166, so Claude Desktop's current models had no slot to map and
+    // fell through to passthrough: they reached Anthropic directly instead of the
+    // provider mapped here. Older ids stay - saved mappings and older Desktop builds
+    // still use them. Guarded by mitm-claude-desktop-offers-current-models.test.js.
     defaultModels: [
+      { id: "claude-opus-5-5", name: "Claude Opus 5.5", alias: "claude-opus-5-5" },
+      { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5", alias: "claude-sonnet-5-5" },
+      { id: "claude-fable-5-1", name: "Claude Fable 5.1", alias: "claude-fable-5-1" },
+      { id: "claude-opus-5", name: "Claude Opus 5", alias: "claude-opus-5" },
+      { id: "claude-sonnet-5", name: "Claude Sonnet 5", alias: "claude-sonnet-5" },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", alias: "claude-opus-4-8" },
       { id: "claude-opus-4-7", name: "Claude Opus 4.7", alias: "claude-opus-4-7" },
       { id: "claude-opus-4-6", name: "Claude Opus 4.6", alias: "claude-opus-4-6" },
       { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6", alias: "claude-sonnet-4-6" },

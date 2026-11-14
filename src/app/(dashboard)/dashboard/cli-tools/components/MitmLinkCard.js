@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Card } from "@/shared/components";
 import Image from "next/image";
+import Icon from "../../../../../shared/components/icons/Icon";
 
 /**
  * Clickable card for MITM tools — navigates to /dashboard/mitm on click.
@@ -26,13 +27,13 @@ export default function MitmLinkCard({ tool }) {
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h3 className="font-medium text-sm">{tool.name}</h3>
+                <h3 className="section-title">{tool.name}</h3>
                 <span className="px-1.5 py-0.5 text-[10px] font-medium bg-purple-500/10 text-purple-600 dark:text-purple-400 rounded-full">MITM</span>
               </div>
               <p className="text-xs text-text-muted truncate">{tool.description}</p>
             </div>
           </div>
-          <span className="material-symbols-outlined text-text-muted text-[20px]">chevron_right</span>
+          <Icon name="chevron_right" size={20} className="text-text-muted" />
         </div>
       </Card>
     </Link>

@@ -8,10 +8,19 @@ import ProviderIcon from "@/shared/components/ProviderIcon";
 import HeaderMenu from "@/shared/components/HeaderMenu";
 import HeaderLanguage from "@/shared/components/HeaderLanguage";
 import ThemeToggle from "@/shared/components/ThemeToggle";
+import { Icon } from "@/shared/components/icons";
+import { useCaptureStatus, describeCapture } from "@/shared/hooks/useCaptureStatus";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS } from "@/shared/constants/providers";
+import { CLI_TOOLS } from "@/shared/constants/cliTools";
+import { setHeaderActionsSlot } from "@/shared/components/headerActionsSlot";
 import { translate } from "@/i18n/runtime";
+import {
+  HEADER_ACTIONS_SLOT_ID,
+  SHELL_GUTTER_X_HEADER,
+  shellTrackClass,
+} from "@/shared/constants/pageShell";
 
 const getPageInfo = (pathname) => {
   if (!pathname) return { title: "", description: "", breadcrumbs: [] };
@@ -34,6 +43,20 @@ const getPageInfo = (pathname) => {
     };
   }
 
+  // /dashboard/media-providers/web is a combined page for the webSearch and
+  // webFetch kinds, not a kind of its own. The regex below matched it anyway,
+  // found no entry in MEDIA_PROVIDER_KINDS, and fell back to the raw path
+  // segment — so the bar read a lowercase "web" where every other title is a
+  // proper name. Same shape as the /providers/new case above: an exact route
+  // caught by a pattern meant for dynamic ids. Exact match, placed first.
+  if (pathname === "/dashboard/media-providers/web")
+    return {
+      title: "Web",
+      description: "Web search and fetch providers",
+      icon: "travel_explore",
+      breadcrumbs: [],
+    };
+
   // Media provider kind: /dashboard/media-providers/[kind]
   const mediaKindMatch = pathname.match(/\/media-providers\/([^/]+)$/);
   if (mediaKindMatch) {
@@ -46,6 +69,41 @@ const getPageInfo = (pathname) => {
       breadcrumbs: [],
     };
   }
+
+  // CLI tool detail: /dashboard/cli-tools/[toolId]
+  //
+  // Without this the bar said only "CLI Tools" on every tool, so the page had
+  // to paint the tool's name itself — the one detail route where removing the
+  // page's own <h1> would have lost which tool you were looking at. CLI_TOOLS
+  // is a keyed map, so the name resolves from the path exactly as the provider
+  // branches below do.
+  const toolMatch = pathname.match(/\/cli-tools\/([^/]+)$/);
+  if (toolMatch) {
+    const tool = CLI_TOOLS[toolMatch[1]];
+    if (tool) {
+      return {
+        title: tool.name,
+        description: "",
+        breadcrumbs: [
+          { label: "CLI Tools", href: "/dashboard/cli-tools" },
+          { label: tool.name, image: tool.image },
+        ],
+      };
+    }
+  }
+
+  // /dashboard/providers/new is a form, not a provider. The `/providers/([^/]+)$`
+  // match below picks up "new", fails to resolve it against OAUTH_PROVIDERS or
+  // APIKEY_PROVIDERS, and falls through to the generic "Providers" entry — so
+  // the bar read "Providers" while the page underneath read "Add New Provider".
+  // Exact match, and ahead of both, because the regex would otherwise win.
+  if (pathname === "/dashboard/providers/new")
+    return {
+      title: "Add New Provider",
+      description: "Configure a new AI provider to use with your applications",
+      icon: "add",
+      breadcrumbs: [],
+    };
 
   // Provider detail page: /dashboard/providers/[id]
   const providerMatch = pathname.match(/\/providers\/([^/]+)$/);
@@ -160,6 +218,41 @@ const getPageInfo = (pathname) => {
       icon: "translate",
       breadcrumbs: [],
     };
+  if (pathname.includes("/pxpipe"))
+    return {
+      title: "PXPIPE",
+      description: "Compress images before they reach a provider",
+      icon: "image",
+      breadcrumbs: [],
+    };
+  if (pathname.includes("/presidio"))
+    return {
+      title: "Presidio",
+      description: "Redact personal data before it leaves this machine",
+      icon: "admin_panel_settings",
+      breadcrumbs: [],
+    };
+  if (pathname.includes("/environment"))
+    return {
+      title: "Environment",
+      description: "Runtime configuration this server was started with",
+      icon: "tune",
+      breadcrumbs: [],
+    };
+  if (pathname.includes("/basic-chat"))
+    return {
+      title: "Chat",
+      description: "Send a request through the router to check a model answers",
+      icon: "chat",
+      breadcrumbs: [],
+    };
+  if (pathname.includes("/settings/pricing"))
+    return {
+      title: "Pricing",
+      description: "Rates used to estimate cost per request",
+      icon: "toll",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/console-log"))
     return {
       title: "Console Log",
@@ -226,7 +319,15 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
   };
 
   return (
-    <header className="shrink-0 flex items-center justify-between gap-3 px-4 lg:px-8 pt-3 pb-2 border-b border-border-subtle bg-surface/60 backdrop-blur-xl lg:bg-transparent lg:backdrop-blur-none z-20">
+    <header className={`shrink-0 ${SHELL_GUTTER_X_HEADER} border-b border-border-subtle bg-surface/60 backdrop-blur-xl lg:bg-transparent lg:backdrop-blur-none z-20`}>
+      {/* The inner track matches the content area's exactly, so the title and
+          the content it labels share a left edge. Both come from pageShell.js;
+          the border above still spans the full width.
+
+          The height is fixed rather than driven by the content: pages with a
+          description measured 79px and pages without (the breadcrumb routes)
+          61px, so the bar resized as you moved between them. */}
+      <div className={`flex min-h-[60px] items-center justify-between gap-3 py-2 lg:min-h-[80px] ${shellTrackClass(pathname)}`}>
       {/* Mobile menu button */}
       <div className="flex items-center gap-3 lg:hidden shrink-0">
         {showMenuButton && (
@@ -234,7 +335,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
             onClick={onMenuClick}
             className="text-text-main hover:text-primary transition-colors"
           >
-            <span className="material-symbols-outlined">menu</span>
+            <Icon name="menu" size={22} />
           </button>
         )}
       </div>
@@ -249,9 +350,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
                 className="flex items-center gap-2"
               >
                 {index > 0 && (
-                  <span className="material-symbols-outlined text-text-muted text-base">
-                    chevron_right
-                  </span>
+                  <Icon name="chevron_right" size={16} className="text-text-muted" />
                 )}
                 {crumb.href ? (
                   <Link
@@ -283,9 +382,7 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
           <div>
             <div className="flex items-center gap-2">
               {icon && (
-                <span className="material-symbols-outlined text-text-muted text-xl lg:text-[26px]">
-                  {icon}
-                </span>
+                <Icon name={icon} size={24} className="text-text-muted" />
               )}
               <h1 className="text-lg lg:text-[28px] lg:leading-9 font-semibold tracking-[-0.02em] truncate">
                 {translate(title)}
@@ -302,9 +399,22 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
 
       {/* Right actions */}
       <div className="flex items-center gap-1 shrink-0">
+        {/* Where a page puts its primary action, via <HeaderActions>. Pages
+            used to paint a second title row to hold one. `empty:hidden` keeps
+            the gap from showing on the pages that have none. */}
+        <div
+          id={HEADER_ACTIONS_SLOT_ID}
+          ref={setHeaderActionsSlot}
+          className="hidden items-center gap-2 empty:hidden lg:flex mr-1"
+        />
+        {/* Capture state on every page, not only the capture page. Enabling
+            capture while a tool is already running looks identical to it
+            working, so "is kRouter intercepting right now" has to be
+            answerable without navigating away from whatever you are doing. */}
+        <CapturePill />
         {displayName && loginMethod === "OIDC" && (
           <div className="hidden sm:flex items-center max-w-[220px] px-3 py-1.5 rounded-full border border-border bg-surface/70 text-xs text-text-muted truncate">
-            <span className="material-symbols-outlined text-[14px] mr-1.5 text-primary">person</span>
+            <Icon name="person" size={14} className="mr-1.5 text-primary" />
             <span className="truncate">{displayName}</span>
             <span className="ml-2 shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
               OIDC
@@ -316,7 +426,51 @@ export default function Header({ onMenuClick, showMenuButton = true }) {
         <HeaderLanguage />
         <HeaderMenu onLogout={handleLogout} />
       </div>
+      </div>
     </header>
+  );
+}
+
+/**
+ * Live capture state.
+ *
+ * Deliberately three states, not two: proxy-only capture covers Antigravity
+ * and leaves Claude Desktop and Kiro going straight to the vendors, so a plain
+ * on/off dot would read "on" for a setup that is half off.
+ */
+function CapturePill() {
+  const capture = useCaptureStatus();
+  const words = describeCapture(capture);
+  if (capture.loading) return null;
+
+  const tone = {
+    on: "border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400",
+    partial: "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400",
+    off: "border-border bg-surface/70 text-text-muted",
+    idle: "border-border bg-surface/70 text-text-muted",
+  }[words.tone];
+
+  const dot = {
+    on: "bg-green-500",
+    partial: "bg-amber-500",
+    off: "bg-text-muted/50",
+    idle: "bg-text-muted/50",
+  }[words.tone];
+
+  return (
+    <Link
+      href="/dashboard/mitm"
+      title={words.long}
+      // On a phone the word is dropped but the dot stays. Hiding the pill
+      // outright was the first cut, and it meant the narrowest screen — the one
+      // most likely to be glanced at — was the only place that could not answer
+      // whether capture was on.
+      className={`flex items-center gap-1.5 rounded-full border py-1 text-[11px] font-medium transition-colors hover:border-primary/40 px-1.5 sm:px-2.5 ${tone}`}
+    >
+      <span aria-hidden="true" className={`size-1.5 rounded-full ${dot}`} />
+      <span className="hidden sm:inline">{words.short}</span>
+      <span className="sr-only">{words.long}</span>
+    </Link>
   );
 }
 
@@ -330,9 +484,7 @@ function HeaderSearch() {
 
   return (
     <div className="relative w-[160px] sm:w-[220px]">
-      <span className="material-symbols-outlined absolute left-2 top-1/2 -translate-y-1/2 text-text-muted text-[16px] pointer-events-none">
-        search
-      </span>
+      <Icon name="search" size={16} className="absolute left-2 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
       <input
         type="text"
         value={query}
@@ -347,7 +499,7 @@ function HeaderSearch() {
           className="absolute right-1 top-1/2 -translate-y-1/2 text-text-muted hover:text-text-main p-0.5 rounded"
           aria-label="Clear search"
         >
-          <span className="material-symbols-outlined text-[16px]">close</span>
+          <Icon name="close" size={16} />
         </button>
       )}
     </div>

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { formatResetTime, getRemainingPercentage } from "./utils";
+import Icon from "../../../../../../shared/components/icons/Icon";
 
 const PAGE_SIZE = 10;
 
@@ -148,7 +149,7 @@ export default function QuotaTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full table-fixed text-left">
+        <table className="data-table table-fixed">
           <tbody>
             {currentPageRows.map((quota) => {
               const colors = getColorClasses(quota.remaining);
@@ -163,7 +164,7 @@ export default function QuotaTable({
                   <td className={`${cellPad} w-[30%]`}>
                     <div className="group/qrow flex items-center gap-1.5 min-w-0">
                       <span className="text-[10px] shrink-0">{colors.emoji}</span>
-                      <span className={`${nameText} font-medium text-text-primary truncate`}>
+                      <span className={`${nameText} font-medium text-text-main truncate`}>
                         {quota.name}
                       </span>
                       {/* 0.5.106 — hide this quota row (persisted per provider) */}
@@ -175,7 +176,7 @@ export default function QuotaTable({
                           title={`Hide "${quota.name}"`}
                           aria-label={`Hide ${quota.name}`}
                         >
-                          <span className="material-symbols-outlined text-[13px] align-middle">visibility_off</span>
+                          <Icon name="visibility_off" size={13} className="align-middle" />
                         </button>
                       )}
                     </div>
@@ -209,7 +210,7 @@ export default function QuotaTable({
                     {countdown !== "-" || resetDisplay ? (
                       compact ? (
                         <div
-                          className={`${resetPrimary} text-text-primary font-medium truncate`}
+                          className={`${resetPrimary} text-text-main font-medium truncate`}
                           title={resetDisplay || ""}
                         >
                           {countdown !== "-" ? `in ${countdown}` : resetDisplay}
@@ -217,7 +218,7 @@ export default function QuotaTable({
                       ) : (
                         <div className="space-y-0.5">
                           {countdown !== "-" && (
-                            <div className={`${resetPrimary} text-text-primary font-medium`}>
+                            <div className={`${resetPrimary} text-text-main font-medium`}>
                               in {countdown}
                             </div>
                           )}
@@ -254,7 +255,7 @@ export default function QuotaTable({
               type="button"
               onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))}
               disabled={page === 1}
-              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-primary transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
+              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-main transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
             >
               Prev
             </button>
@@ -262,7 +263,7 @@ export default function QuotaTable({
               type="button"
               onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))}
               disabled={page === totalPages}
-              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-primary transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
+              className="flex h-6 items-center rounded-md border border-black/10 px-2 text-[10px] text-text-main transition-colors hover:bg-black/5 disabled:cursor-not-allowed disabled:opacity-40 dark:border-white/10 dark:hover:bg-white/5"
             >
               Next
             </button>

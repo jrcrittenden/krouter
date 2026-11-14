@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { Card, Badge, Button } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
+import Icon from "../../../../../shared/components/icons/Icon";
+import EmptyState from "@/shared/components/EmptyState";
 
 function getEffectiveStatus(conn) {
   const isCooldown = Object.entries(conn).some(
@@ -54,7 +56,7 @@ function ProviderCard({ provider, kind, connections }) {
             />
           </div>
           <div>
-            <h3 className="font-semibold text-sm">{provider.name}</h3>
+            <h3 className="section-title">{provider.name}</h3>
             <div className="flex items-center gap-2 mt-0.5 flex-wrap">{renderStatus()}</div>
           </div>
         </div>
@@ -73,7 +75,7 @@ function ComboList({ combos }) {
         <Link key={combo.id} href={`/dashboard/media-providers/combo/${combo.id}`}>
           <Card padding="xs" className="hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors cursor-pointer">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="material-symbols-outlined text-primary text-[18px]">layers</span>
+              <Icon name="layers" size={18} className="text-primary" />
               <code className="text-sm font-mono font-medium flex-1 truncate">{combo.name}</code>
               {/* Provider icons preview */}
               <div className="flex flex-wrap items-center gap-1 sm:shrink-0">
@@ -98,7 +100,7 @@ function ComboList({ combos }) {
                 )}
               </div>
               <span className="text-[11px] text-text-muted shrink-0">{combo.models.length}</span>
-              <span className="material-symbols-outlined text-text-muted text-[16px]">chevron_right</span>
+              <Icon name="chevron_right" size={16} className="text-text-muted" />
             </div>
           </Card>
         </Link>
@@ -113,8 +115,8 @@ function Section({ title, icon, kind, providers, connections, combos, onCreateCo
       {/* Header — title left, Create Combo right */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="material-symbols-outlined text-primary">{icon}</span>
-          <h2 className="text-base font-semibold">{title}</h2>
+          <Icon name={icon} size={24} className="text-primary" />
+          <h2 className="section-title">{title}</h2>
           <span className="text-xs text-text-muted">({providers.length} providers · {combos.length} combos)</span>
         </div>
         <Button size="sm" icon="add" onClick={onCreateCombo}>Create Combo</Button>
@@ -129,9 +131,10 @@ function Section({ title, icon, kind, providers, connections, combos, onCreateCo
 
       {/* Providers grid — bottom */}
       {providers.length === 0 ? (
-        <div className="text-center py-8 border border-dashed border-border rounded-xl text-text-muted text-sm">
-          No providers.
-        </div>
+        <EmptyState
+          title="No providers."
+          className="rounded-xl border border-dashed border-border"
+        />
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {providers.map((p) => (
@@ -189,7 +192,7 @@ export default function WebProvidersPage() {
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       <Section
         title="Web Search" icon="search" kind="webSearch"
         providers={searchProviders} connections={connections} combos={searchCombos}

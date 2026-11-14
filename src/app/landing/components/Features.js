@@ -1,5 +1,7 @@
 "use client";
 
+import Icon from "../../../shared/components/icons/Icon";
+
 const FEATURES = [
   { 
     icon: "link", 
@@ -104,7 +106,7 @@ export default function Features() {
     <section className="py-24 px-6" id="features">
       <div className="max-w-7xl mx-auto">
         <div className="mb-16">
-          <h2 className="text-3xl md:text-4xl font-bold mb-4">Powerful Features</h2>
+          <h2 className="section-title text-3xl md:text-4xl mb-4">Powerful Features</h2>
           <p className="text-gray-400 max-w-xl text-lg">
             Everything you need to manage your AI infrastructure in one place, built for scale.
           </p>
@@ -117,7 +119,7 @@ export default function Features() {
               className={`p-6 rounded-xl bg-[#23180f] border border-[#3a2f27] ${feature.colors.border} ${feature.colors.bg} transition-all duration-300 group`}
             >
               <div className={`w-10 h-10 rounded-lg ${feature.colors.iconBg} flex items-center justify-center mb-4 ${feature.colors.iconText} group-hover:scale-110 transition-transform duration-300`}>
-                <span className="material-symbols-outlined">{feature.icon}</span>
+                <Icon name={feature.icon} size={24} />
               </div>
               <h3 className={`text-lg font-bold mb-2 ${feature.colors.titleHover} transition-colors`}>
                 {feature.title}

@@ -9,6 +9,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { parseSSEToOpenAIResponse, streamErrorStatus } from "./sseToJsonHandler.js";
 import { openAICompletionToClaudeMessage, openAICompletionToResponsesObject } from "./completionConverters.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats } from "./requestDetail.js";
+import { mitmToolFromRequest } from "../../utils/mitmTool.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
 import { detectEmptyCompletion, readCompletionShape, EMPTY_COMPLETION_STATUS } from "../../utils/emptyCompletion.js";
@@ -40,7 +41,33 @@ function summarizeResponsesObject(r) {
   return { content: text, thinking, finish_reason: finish };
 }
 
+// 0.5.169 — every provider branch below ends by building an OpenAI `chat.completion`,
+// and only the OpenAI-provider branch ever converted that to the Responses envelope. A
+// Codex-style client (client format OPENAI_RESPONSES) therefore got
+// {object:"chat.completion", choices:[...]} with no `output[]` to read, from EVERY other
+// provider. Verified live on the dev server against all three configured connections:
+//
+//   POST /v1/responses {"stream":false}      cc/claude-opus-5           object=chat.completion
+//                                            ag/claude-sonnet-5-5-high  object=chat.completion
+//                                            kr/claude-sonnet-4.5       object=chat.completion
+//   the same request with {"stream":true}    all three                  9-10 response.* SSE events
+//
+// so the streaming path was right and only non-streaming leaked — the same shape of gap
+// fixed for Claude clients in 0.5.109 (openai), 0.5.117 (kiro) and 0.5.146 (antigravity).
+// Doing it once here rather than per branch means a provider added later cannot reopen it.
+// sseToJsonHandler.js already applies this converter on its own path.
 export function translateNonStreamingResponse(responseBody, targetFormat, sourceFormat) {
+  const translated = translateForClientFormat(responseBody, targetFormat, sourceFormat);
+  // Guard on the envelope, not the branch: a body that is already a Responses object
+  // (the OPENAI/OPENAI_RESPONSES branch, or a provider that natively speaks Responses)
+  // has object:"response" and is left alone, so this never double-converts.
+  if (sourceFormat === FORMATS.OPENAI_RESPONSES && translated?.object === "chat.completion") {
+    return openAICompletionToResponsesObject(translated);
+  }
+  return translated;
+}
+
+function translateForClientFormat(responseBody, targetFormat, sourceFormat) {
   if (targetFormat === sourceFormat) return responseBody;
 
   // 0.5.109 (upstream 8a664d61) — provider speaks OpenAI, client speaks Claude.
@@ -255,12 +282,20 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
   const emptyDiagnosis = detectEmptyCompletion({
     ...readCompletionShape(responseBody),
     maxTokens: finalBody?.max_tokens ?? translatedBody?.max_tokens ?? body?.max_tokens,
+    // 0.5.172 — the requested model, so a vendor retirement notice can be told apart
+    // from a real answer that happens to discuss a retired model.
+    model,
   });
   if (emptyDiagnosis) {
     reqLogger.logConvertedResponse({ warning: emptyDiagnosis.code, detail: emptyDiagnosis.message });
   }
-  appendLog({ tokens: usage, status: "200 OK" });
-  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint });
+  // 0.5.172 — record what actually happened. EMPTY_COMPLETION_STATUS exists for exactly
+  // this ("so it is not filed alongside real 200s") and was called from nowhere, so every
+  // zero-content 200 — and every vendor retirement notice — went into the request log as
+  // a clean "200 OK". That is what made the retirement case invisible: billed, logged as
+  // a success, and shown to the user as the model's own words.
+  appendLog({ tokens: usage, status: EMPTY_COMPLETION_STATUS(emptyDiagnosis) });
+  saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, tool: mitmToolFromRequest(clientRawRequest) });
 
   const translatedResponse = needsTranslation(targetFormat, sourceFormat)
     ? translateNonStreamingResponse(responseBody, targetFormat, sourceFormat)

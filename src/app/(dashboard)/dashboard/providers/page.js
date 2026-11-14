@@ -27,6 +27,9 @@ import ZenithStrip from "./ZenithStrip";
 import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
+import Icon from "../../../../shared/components/icons/Icon";
+import useDialog from "@/shared/hooks/useDialog";
+import EmptyState from "@/shared/components/EmptyState";
 
 function getStatusDisplay(connected, error, errorCode) {
   const parts = [];
@@ -107,6 +110,7 @@ export default function ProvidersPage() {
     useState(false);
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
+  const testDialog = useDialog({ isOpen: Boolean(testResults), onClose: () => setTestResults(null) });
   const notify = useNotificationStore();
   const searchQuery = useHeaderSearchStore((s) => s.query);
   const registerSearch = useHeaderSearchStore((s) => s.register);
@@ -320,7 +324,7 @@ export default function ProvidersPage() {
 
   if (loading) {
     return (
-      <div className="flex flex-col gap-8">
+      <div className="flex flex-col gap-6">
         <CardSkeleton />
         <CardSkeleton />
       </div>
@@ -336,16 +340,14 @@ export default function ProvidersPage() {
     anthropicCompatibleProviders.length > 0;
 
   return (
-    <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+    <div className="flex min-w-0 flex-col gap-6">
       {/* 0.5.91 — Zenith Engine strip */}
       <ZenithStrip />
       {!hasAnyResult && (
-        <div className="text-center py-8 border border-dashed border-border rounded-xl">
-          <span className="material-symbols-outlined text-[32px] text-text-muted mb-2">
-            search_off
-          </span>
-          <p className="text-text-muted text-sm">No providers match your search</p>
-        </div>
+        <EmptyState
+          title="No providers match your search"
+          className="rounded-xl border border-dashed border-border"
+        />
       )}
 
       {/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}
@@ -354,7 +356,7 @@ export default function ProvidersPage() {
           {/* The parenthetical used to sit inside the heading, which pushed it onto two
               lines and made it read louder than the page title. It is a subtitle. */}
           <div className="min-w-0">
-            <h2 className="text-[17px] sm:text-lg font-semibold leading-tight tracking-[-0.01em]">
+            <h2 className="section-title text-[17px] tracking-[-0.01em]">
               Custom Providers
             </h2>
             <p className="text-[13px] leading-5 text-text-muted mt-0.5">
@@ -388,7 +390,7 @@ export default function ProvidersPage() {
         {compatibleProviders.length === 0 &&
         anthropicCompatibleProviders.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
-            <span className="material-symbols-outlined text-[18px]">extension</span>
+            <Icon name="extension" size={18} />
             <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
           </div>
         ) : (
@@ -415,7 +417,7 @@ export default function ProvidersPage() {
       {oauthEntries.length > 0 && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+          <h2 className="section-title flex items-center gap-2">
             OAuth Providers
           </h2>
           <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
@@ -431,11 +433,7 @@ export default function ProvidersPage() {
               title="Test all OAuth connections"
               aria-label="Test all OAuth connections"
             >
-              <span
-                className={`material-symbols-outlined text-[14px]${testingMode === "oauth" ? " animate-spin" : ""}`}
-              >
-                play_arrow
-              </span>
+              <Icon name="play_arrow" size={14} className={`${testingMode === "oauth" ? " animate-spin" : ""}`} />
               {testingMode === "oauth" ? "Testing..." : "Test All"}
             </button>
           </div>
@@ -459,7 +457,7 @@ export default function ProvidersPage() {
       {(freeEntries.length > 0 || freeTierEntries.length > 0) && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+          <h2 className="section-title flex items-center gap-2">
             Free Tier Providers
           </h2>
           <button
@@ -473,11 +471,7 @@ export default function ProvidersPage() {
             title="Test all Free connections"
             aria-label="Test all Free provider connections"
           >
-            <span
-              className={`material-symbols-outlined text-[14px]${testingMode === "free" ? " animate-spin" : ""}`}
-            >
-              play_arrow
-            </span>
+            <Icon name="play_arrow" size={14} className={`${testingMode === "free" ? " animate-spin" : ""}`} />
             {testingMode === "free" ? "Testing..." : "Test All"}
           </button>
         </div>
@@ -510,7 +504,7 @@ export default function ProvidersPage() {
       {apikeyEntries.length > 0 && (
       <div className="flex flex-col gap-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2 leading-tight">
+          <h2 className="section-title flex items-center gap-2">
             API Key Providers{" "}
           </h2>
           <button
@@ -524,11 +518,7 @@ export default function ProvidersPage() {
             title="Test all API Key connections"
             aria-label="Test all API Key connections"
           >
-            <span
-              className={`material-symbols-outlined text-[14px]${testingMode === "apikey" ? " animate-spin" : ""}`}
-            >
-              play_arrow
-            </span>
+            <Icon name="play_arrow" size={14} className={`${testingMode === "apikey" ? " animate-spin" : ""}`} />
             {testingMode === "apikey" ? "Testing..." : "Test All"}
           </button>
         </div>
@@ -549,7 +539,7 @@ export default function ProvidersPage() {
             onClick={() => setShowAllApikey(true)}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2.5 text-sm font-medium text-primary transition-colors hover:border-primary hover:bg-primary/5"
           >
-            <span className="material-symbols-outlined text-[16px]">expand_more</span>
+            <Icon name="expand_more" size={16} />
             Show all {apikeyEntries.length} providers
           </button>
         )}
@@ -559,7 +549,7 @@ export default function ProvidersPage() {
       {/* Web Cookie Providers — use browser subscription cookie instead of API key */}
       {/* <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <h2 className="text-xl font-semibold flex items-center gap-2">
+          <h2 className="section-title flex items-center gap-2">
             Web Cookie Providers{" "}
           </h2>
         </div>
@@ -602,17 +592,18 @@ export default function ProvidersPage() {
         >
           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
           <div
-            className="relative bg-surface border border-border rounded-xl w-full max-w-[600px] max-h-[86vh] sm:max-h-[80vh] overflow-y-auto shadow-2xl"
+            {...testDialog.panelProps}
+            className="relative bg-surface border border-border rounded-xl w-full max-w-[600px] max-h-[86vh] sm:max-h-[80vh] overflow-y-auto shadow-2xl outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="sticky top-0 z-10 flex items-center justify-between px-5 py-3 border-b border-border bg-surface/95 backdrop-blur-sm rounded-t-xl">
-              <h3 className="font-semibold">Test Results</h3>
+              <h3 id={testDialog.titleId} className="section-title">Test Results</h3>
               <button
                 onClick={() => setTestResults(null)}
                 className="p-1 rounded-lg hover:bg-bg text-text-muted hover:text-text-main transition-colors"
                 aria-label="Close test results"
               >
-                <span className="material-symbols-outlined text-lg">close</span>
+                <Icon name="close" size={18} />
               </button>
             </div>
             <div className="p-5">
@@ -668,14 +659,12 @@ function ProviderCard({ providerId, provider, stats, authType, onToggle }) {
               />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate font-semibold">{provider.name}</h3>
+              <h3 className="section-title truncate">{provider.name}</h3>
               <div className="flex min-w-0 items-center gap-1.5 text-xs flex-wrap">
                 {allDisabled ? (
                   <Badge variant="default" size="sm">
                     <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[12px]">
-                        pause_circle
-                      </span>
+                      <Icon name="pause_circle" size={12} />
                       Disabled
                     </span>
                   </Badge>
@@ -796,14 +785,12 @@ function ApiKeyProviderCard({
               />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate font-semibold">{provider.name}</h3>
+              <h3 className="section-title truncate">{provider.name}</h3>
               <div className="flex min-w-0 items-center gap-1.5 text-xs flex-wrap">
                 {allDisabled ? (
                   <Badge variant="default" size="sm">
                     <span className="flex items-center gap-1">
-                      <span className="material-symbols-outlined text-[12px]">
-                        pause_circle
-                      </span>
+                      <Icon name="pause_circle" size={12} />
                       Disabled
                     </span>
                   </Badge>
@@ -1255,9 +1242,7 @@ function ProviderTestResultsView({ results }) {
   if (results.error && !results.results) {
     return (
       <div className="text-center py-6">
-        <span className="material-symbols-outlined text-red-500 text-[32px] mb-2 block">
-          error
-        </span>
+        <Icon name="error" size={32} className="text-red-500 mb-2 block" />
         <p className="text-sm text-red-400">{results.error}</p>
       </div>
     );
@@ -1297,11 +1282,7 @@ function ProviderTestResultsView({ results }) {
           key={r.connectionId || i}
           className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg bg-black/[0.03] px-3 py-2 text-xs dark:bg-white/[0.03] sm:flex-nowrap"
         >
-          <span
-            className={`material-symbols-outlined text-[16px] ${r.valid ? "text-emerald-500" : "text-red-500"}`}
-          >
-            {r.valid ? "check_circle" : "error"}
-          </span>
+          <Icon name={r.valid ? "check_circle" : "error"} size={16} className={`${r.valid ? "text-emerald-500" : "text-red-500"}`} />
           <div className="min-w-0 flex-[1_1_160px]">
             <span className="block truncate font-medium sm:inline">
               {r.connectionName}

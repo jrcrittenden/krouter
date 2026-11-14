@@ -6,6 +6,7 @@ import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats } from "./requestDetail.js";
+import { mitmToolFromRequest } from "../../utils/mitmTool.js";
 import { saveRequestDetail, appendRequestLog } from "@/lib/usageDb.js";
 
 function textFromResponsesMessageItem(item) {
@@ -157,8 +158,7 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       if (onRequestSuccess) await onRequestSuccess();
 
       const usage = jsonResponse.usage || {};
-      appendLog({ tokens: usage, status: "200 OK" });
-      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint });
+      saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, tool: mitmToolFromRequest(clientRawRequest) });
 
       const { msgItem, textContent } = pickAssistantMessageForChatCompletion(jsonResponse.output);
 
@@ -170,7 +170,12 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         finishReason: jsonResponse.status ?? null,
         usage,
         maxTokens: finalBody?.max_tokens ?? body?.max_tokens,
+        model,
       });
+      // 0.5.172 — appendLog moved below the diagnosis and given the real status.
+      // saveRequestDetail already files this correctly ("empty" vs "success"); the
+      // request log said "200 OK" regardless, so the two disagreed about the same call.
+      appendLog({ tokens: usage, status: EMPTY_COMPLETION_STATUS(emptyDiagnosis) });
 
       const totalLatency = Date.now() - requestStartTime;
 
@@ -276,9 +281,10 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
       ...readCompletionShape(parsed),
       usage,
       maxTokens: finalBody?.max_tokens ?? body?.max_tokens,
+      model,
     });
-    appendLog({ tokens: usage, status: "200 OK" });
-    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint });
+    appendLog({ tokens: usage, status: EMPTY_COMPLETION_STATUS(emptyDiagnosis) });
+    saveUsageStats({ provider, model, tokens: usage, connectionId, apiKey, endpoint: clientRawRequest?.endpoint, tool: mitmToolFromRequest(clientRawRequest) });
 
     const totalLatency = Date.now() - requestStartTime;
     saveRequestDetail(buildRequestDetail({

@@ -1,8 +1,8 @@
 const { exec, spawn, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
-const os = require("os");
 const net = require("net");
+const os = require("os");
 const https = require("https");
 const crypto = require("crypto");
 const { addDNSEntry, removeDNSEntry, removeAllDNSEntries, removeAllDNSEntriesSync, checkAllDNSStatus, TOOL_HOSTS, isSudoAvailable, isSudoPasswordRequired } = require("./dns/dnsConfig");
@@ -14,10 +14,12 @@ const IS_MAC = process.platform === "darwin";
 const { generateCert } = require("./cert/generate");
 const { installCert, uninstallCert } = require("./cert/install");
 const { isCertExpired } = require("./cert/rootCA");
-const { DATA_DIR, MITM_DIR } = require("./paths");
+const { DATA_DIR, MITM_DIR, IS_DEFAULT_DATA_DIR } = require("./paths");
 const { log, err } = require("./logger");
 const { LSOF_BIN } = require("./config");
-const { setLinuxNodeExtraCaCerts, unsetLinuxNodeExtraCaCerts } = require("./linuxNodeCaCerts");
+const { setLinuxNodeExtraCaCerts } = require("./linuxNodeCaCerts");
+const { setGoSslCertFile } = require("./goCaCerts");
+const { configureIdeCaTrust } = require("./ideCaTrust");
 
 const IS_LINUX = process.platform === "linux";
 
@@ -26,6 +28,50 @@ const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 function shellQuoteSingle(str) {
   if (str == null || str === "") return "''";
   return `'${String(str).replace(/'/g, "'\\''")}'`;
+}
+
+// Env vars forwarded to the sudo-spawned MITM server when they are set.
+//
+// The server reads these; the four it always needs are set unconditionally at
+// the call site. Keep this in sync with what src/mitm/* reads from process.env
+// — a var missing here is not an error, it is a switch that silently does
+// nothing, which is how MITM_FILE_LOG went unnoticed.
+const SUDO_FORWARDED_ENV = Object.freeze([
+  "MITM_FILE_LOG",
+  "MITM_MAX_DUMP_FILES",
+  "DEBUG_MITM",
+  "DATA_DIR",
+  "KROUTER_DATA_DIR",
+  "NODE_EXTRA_CA_CERTS",
+  "SSL_CERT_FILE",
+]);
+
+// Sentinels framing the env block on the child's stdin. Not configurable: they
+// only have to be text no shell `read` would produce from a password.
+const ENV_BEGIN = "__KROUTER_ENV_BEGIN__";
+const ENV_END = "__KROUTER_ENV_END__";
+
+/**
+ * The bytes written to the sudo child's stdin: password, then the env block.
+ *
+ * A value containing a newline would end the line early and the rest would be
+ * exported as a separate assignment, so such a value is rejected rather than
+ * silently truncated. Nothing legitimate here contains one.
+ *
+ * @param {string} password sudo password (may be empty when sudo is passwordless)
+ * @param {Record<string,string>} env  variables for the child
+ */
+function buildSudoEnvStdin(password, env) {
+  const lines = [`${password == null ? "" : password}`, ENV_BEGIN];
+  for (const [k, v] of Object.entries(env)) {
+    const value = v == null ? "" : String(v);
+    if (/[\r\n]/.test(value) || /[\r\n=]/.test(k)) {
+      throw new Error(`Refusing to pass ${k} to the MITM server: newline in name or value`);
+    }
+    lines.push(`${k}=${value}`);
+  }
+  lines.push(ENV_END, "");
+  return lines.join("\n");
 }
 
 async function resolveMitmRouterBaseUrl() {
@@ -46,6 +92,9 @@ const MITM_PORT = 443;
 const MITM_WIN_NODE_PORT = 8443;
 const PID_FILE = path.join(MITM_DIR, ".mitm.pid");
 const LOCK_FILE = path.join(MITM_DIR, ".mitm.lock");
+// How long a start lock can be held before it is treated as abandoned. Only a
+// backstop for a reclaimed pid number; liveness is the primary check.
+const STALE_LOCK_MS = 2 * 60 * 1000;
 
 const MITM_MAX_RESTARTS = 5;
 const MITM_RESTART_DELAYS_MS = [5000, 10000, 20000, 30000, 60000];
@@ -135,7 +184,15 @@ function isProcessAlive(pid) {
     process.kill(pid, 0);
     return true;
   } catch (err) {
-    return err.code === "EACCES";
+    // EPERM means the process exists and belongs to someone else. The MITM
+    // runs as root, so this is the normal answer for a healthy capture seen
+    // from an unprivileged process -- reading it as dead would report "not
+    // running" AND unlink the pid file, taking the tray's capture indicator
+    // and the leftover-kill path down with it.
+    //
+    // The check used to be for EACCES, which Node's process.kill never throws:
+    // the branch could not fire, so the only thing it did was look handled.
+    return err.code === "EPERM" || err.code === "EACCES";
   }
 }
 
@@ -155,14 +212,59 @@ function killProcess(pid, force = false, sudoPassword = null) {
   }
 }
 
-function deriveKey() {
+/**
+ * Every key this machine's saved sudo password could be under, best first.
+ *
+ * This used to be one key from `machineIdSync()`, with a silent fall back to the
+ * salt alone when that threw — and on macOS under launchd it always threw.
+ * `node-machine-id` shells out to `ioreg`, which lives in /usr/sbin, and the
+ * LaunchAgent's PATH is /opt/homebrew/.../bin:/usr/local/bin:/usr/bin:/bin. No
+ * /usr/sbin, no ioreg, so the key quietly became a different key than the one
+ * the password was encrypted under, GCM rejected the tag, and the only symptom
+ * was "MITM was enabled but no saved password found, skipping auto-start" on
+ * every boot. MITM never came back after a restart, and the watchdog then
+ * stripped the DNS redirects it could no longer serve.
+ *
+ * The first candidate is the machine id this app already persists to
+ * DATA_DIR/machine-id (see shared/utils/machineId.js, which keeps that file for
+ * exactly this reason: "guarantees CLI/server/middleware see same value even
+ * when machineIdSync fails"). Reading a file needs no PATH.
+ *
+ * The rest are the historical keys. A password saved before this change still
+ * opens, so nobody has to re-enter it — including on a machine where ioreg was
+ * never reachable and the salt-only key is the real one.
+ */
+let _keyCandidates = null;
+function deriveKeyCandidates() {
+  if (_keyCandidates) return _keyCandidates;
+  const keys = [];
+  const add = (raw) => {
+    const key = crypto.createHash("sha256").update(raw + ENCRYPT_SALT).digest();
+    if (!keys.some((k) => k.equals(key))) keys.push(key);
+  };
+
   try {
+    const persisted = fs.readFileSync(path.join(DATA_DIR, "machine-id"), "utf8").trim();
+    if (persisted) add(persisted);
+  } catch { /* not written yet — fall through */ }
+
+  try {
+    // Shells out to ioreg on macOS. Kept for blobs saved under the old key, but
+    // memoized: without that it ran on every decrypt attempt and printed
+    // "/bin/sh: ioreg: command not found" to stderr once per call under launchd.
     const { machineIdSync } = require("node-machine-id");
-    const raw = machineIdSync();
-    return crypto.createHash("sha256").update(raw + ENCRYPT_SALT).digest();
-  } catch {
-    return crypto.createHash("sha256").update(ENCRYPT_SALT).digest();
-  }
+    add(machineIdSync());
+  } catch { /* no ioreg on PATH, which is the whole point of the file above */ }
+
+  const saltOnly = crypto.createHash("sha256").update(ENCRYPT_SALT).digest();
+  if (!keys.some((k) => k.equals(saltOnly))) keys.push(saltOnly);
+  _keyCandidates = keys;
+  return keys;
+}
+
+/** The key new passwords are encrypted under: the most stable one available. */
+function deriveKey() {
+  return deriveKeyCandidates()[0];
 }
 
 function encryptPassword(plaintext) {
@@ -175,16 +277,18 @@ function encryptPassword(plaintext) {
 }
 
 function decryptPassword(stored) {
-  try {
-    const [ivHex, tagHex, dataHex] = stored.split(":");
-    if (!ivHex || !tagHex || !dataHex) return null;
-    const key = deriveKey();
-    const decipher = crypto.createDecipheriv(ENCRYPT_ALGO, key, Buffer.from(ivHex, "hex"));
-    decipher.setAuthTag(Buffer.from(tagHex, "hex"));
-    return decipher.update(Buffer.from(dataHex, "hex")) + decipher.final("utf8");
-  } catch {
-    return null;
+  const [ivHex, tagHex, dataHex] = String(stored || "").split(":");
+  if (!ivHex || !tagHex || !dataHex) return null;
+  // Try every key this machine could have encrypted under, so a password saved
+  // under an older derivation still opens instead of reading as "not saved".
+  for (const key of deriveKeyCandidates()) {
+    try {
+      const decipher = crypto.createDecipheriv(ENCRYPT_ALGO, key, Buffer.from(ivHex, "hex"));
+      decipher.setAuthTag(Buffer.from(tagHex, "hex"));
+      return decipher.update(Buffer.from(dataHex, "hex")) + decipher.final("utf8");
+    } catch { /* wrong key for this blob — try the next */ }
   }
+  return null;
 }
 
 let _getSettings = null;
@@ -206,6 +310,25 @@ async function saveMitmSettings(enabled, password) {
   }
 }
 
+/**
+ * Remember whether proxy capture is meant to be on.
+ *
+ * It used to record nothing but a pid file, so nothing could bring it back: the
+ * only reason a long-running proxy survived app restarts is that it is spawned
+ * detached and unref'd, so it outlives its parent and gets reparented to launchd.
+ * Kill it once — a reboot, a crash, an unlucky pkill — and it was gone until
+ * someone pressed the button again, with no record that it had ever been on.
+ * The :443 transport has had `mitmEnabled` for exactly this; this is its twin.
+ */
+async function saveProxyCaptureEnabled(enabled) {
+  if (!_updateSettings) return;
+  try {
+    await _updateSettings({ proxyCaptureEnabled: enabled });
+  } catch (e) {
+    err(`Failed to save proxy capture state: ${e.message}`);
+  }
+}
+
 async function clearEncryptedPassword() {
   if (!_updateSettings) return;
   try {
@@ -215,13 +338,33 @@ async function clearEncryptedPassword() {
   }
 }
 
+/**
+ * The saved sudo password, or null.
+ *
+ * Every failure here used to return a bare null, and the one caller that matters
+ * — auto-start on boot — turned that into "no saved password found, skipping".
+ * That sentence is wrong for three of the four ways this can fail, and it is the
+ * only thing a user saw when MITM silently did not come up after a reboot. Each
+ * cause now says which it is.
+ */
 async function loadEncryptedPassword() {
-  if (!_getSettings) return null;
+  if (!_getSettings) {
+    log("🔐 Cannot read the saved sudo password: no settings hook registered (initDbHooks was never called in this module instance).");
+    return null;
+  }
   try {
     const settings = await _getSettings();
-    if (!settings.mitmSudoEncrypted) return null;
-    return decryptPassword(settings.mitmSudoEncrypted);
-  } catch {
+    if (!settings.mitmSudoEncrypted) {
+      log("🔐 No sudo password saved — MITM has to be started once from the dashboard to store one.");
+      return null;
+    }
+    const password = decryptPassword(settings.mitmSudoEncrypted);
+    if (!password) {
+      log("🔐 The saved sudo password did not decrypt. It is bound to this machine's id, so a changed machine id or a copied data dir invalidates it — start MITM once from the dashboard to save it again.");
+    }
+    return password;
+  } catch (e) {
+    log(`🔐 Reading the saved sudo password failed: ${e.message}`);
     return null;
   }
 }
@@ -376,6 +519,247 @@ function pollMitmHealth(timeoutMs, port = MITM_PORT) {
 /**
  * Get full MITM status including per-tool DNS status
  */
+// 0.5.173 — is something actually accepting on the MITM port?
+//
+// `running` was decided by the in-process handle plus the PID file. Both are blind to a
+// MITM server that outlives the app process that spawned it: restart the app and
+// serverProcess is null, while the real server — spawned through sudo, owned by root —
+// is still listening. `lsof` cannot see a root-owned listener as an ordinary user either,
+// which is the same blind spot that made a manual check report "MITM is down" earlier.
+//
+// That matters because of what reads this flag: healStaleMitmDns treats
+// "DNS redirects present + server not running" as the blackhole state and REMOVES the
+// redirects. With a false negative here it deleted live, working redirects every
+// watchdog tick. Observed on a real machine: antigravity and kiro DNS confirmed active
+// and intercepting at 12:02, both entries gone minutes later with the server still up,
+// and the IDEs quietly back on the vendor's own billing.
+//
+// A TCP connect is the one check that does not care who owns the socket. Being wrong in
+// the other direction is cheap: we keep redirects we could have cleaned, and the next
+// tick tries again. Deleting a working redirect is not cheap.
+const MITM_LOCAL_PORT = 443;
+
+function isPortAccepting(port, timeoutMs = 400) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    const done = (v) => { try { socket.destroy(); } catch { /* ignore */ } resolve(v); };
+    socket.setTimeout(timeoutMs);
+    socket.once("connect", () => done(true));
+    socket.once("timeout", () => done(false));
+    socket.once("error", () => done(false));
+    try { socket.connect(port, "127.0.0.1"); } catch { done(false); }
+  });
+}
+
+// ── Proxy capture mode ───────────────────────────────────────
+// 0.5.175 — The second capture transport (src/mitm/proxy.js). Everything here
+// is deliberately simpler than the :443 path because nothing is privileged:
+// no sudo, no /etc/hosts, no port 443 to wrestle away from another process, and
+// nothing left behind to heal if the process dies. Stopping it cannot leave a
+// domain unreachable, which is the failure mode the DNS transport has.
+
+const PROXY_DEFAULT_PORT = 20129;
+const PROXY_PID_FILE = path.join(MITM_DIR, ".proxy.pid");
+const PROXY_LOG_FILE = path.join(MITM_DIR, "proxy.log");
+let proxyProcess = null;
+let proxyPid = null;
+
+function proxyPort() {
+  const n = Number(process.env.MITM_PROXY_PORT || PROXY_DEFAULT_PORT);
+  return Number.isInteger(n) && n > 0 && n < 65536 ? n : PROXY_DEFAULT_PORT;
+}
+
+/** Last line the proxy wrote, so a failed start says why. */
+function lastProxyLogLine() {
+  try {
+    const lines = fs.readFileSync(PROXY_LOG_FILE, "utf-8").trim().split("\n");
+    return lines[lines.length - 1] || "";
+  } catch {
+    return "";
+  }
+}
+
+function resolveBundledProxyPath() {
+  if (process.env.MITM_PROXY_PATH) return process.env.MITM_PROXY_PATH;
+  const sibling = path.join(__dirname, "proxy.js");
+  if (fs.existsSync(sibling)) return sibling;
+  const fromCwd = path.join(process.cwd(), "src", "mitm", "proxy.js");
+  if (fs.existsSync(fromCwd)) return fromCwd;
+  const fromNext = path.join(process.cwd(), "..", "src", "mitm", "proxy.js");
+  if (fs.existsSync(fromNext)) return fromNext;
+  return fromCwd;
+}
+
+/**
+ * Is the proxy accepting? The PORT decides, never the process handle.
+ *
+ * Holding a live child handle is not evidence that anything is listening: a
+ * child that spawned and then failed to bind leaves the handle intact, and
+ * reporting "running" for it is how 0.5.171 came to delete working DNS
+ * redirects -- status that disagrees with reality is worse than status that
+ * says nothing. Asking the port also credits a proxy that outlived this app.
+ */
+async function getProxyCaptureStatus() {
+  const port = proxyPort();
+  const alive = await isPortAccepting(port);
+  let pid = proxyPid;
+  if (!pid) {
+    try { pid = Number(fs.readFileSync(PROXY_PID_FILE, "utf-8").trim()) || null; } catch { pid = null; }
+  }
+  return {
+    running: alive,
+    port,
+    pid: alive ? pid : null,
+    // What the user has to put in front of the client. Nothing can set this for
+    // an already-running app, so it is surfaced rather than applied.
+    proxyUrl: `http://127.0.0.1:${port}`,
+  };
+}
+
+/** Start the proxy. Never asks for a password -- that is the point of the mode. */
+async function startProxyCapture(apiKey) {
+  const port = proxyPort();
+  if (await isPortAccepting(port)) {
+    // Already up is still "on", so record the intent — otherwise a second press
+    // of an already-enabled toggle leaves it unrecorded and unrestartable.
+    await saveProxyCaptureEnabled(true);
+    return { ...(await getProxyCaptureStatus()), alreadyRunning: true };
+  }
+
+  const proxyPath = resolveBundledProxyPath();
+  if (!fs.existsSync(proxyPath)) throw new Error(`Proxy not found at ${proxyPath}`);
+
+  const mitmRouterBase = await resolveMitmRouterBaseUrl();
+
+  // Detached, with output to a file rather than a pipe. Piped stdio ties the
+  // child's lifetime to a reader: once this app exits, the read end closes and
+  // the child's next log write hits a dead pipe, which in testing killed the
+  // request it was serving while the port stayed open -- a proxy that accepts
+  // connections and answers nothing. A file also means a failed start is still
+  // diagnosable after the parent has gone.
+  let logFd = null;
+  try {
+    logFd = fs.openSync(PROXY_LOG_FILE, "a");
+  } catch { /* fall back to discarding output rather than failing to start */ }
+
+  proxyProcess = spawn(process.execPath, [proxyPath], {
+    detached: true,
+    windowsHide: true,
+    cwd: os.tmpdir(),
+    stdio: ["ignore", logFd ?? "ignore", logFd ?? "ignore"],
+    env: {
+      ...process.env,
+      ROUTER_API_KEY: apiKey,
+      MITM_ROUTER_BASE: mitmRouterBase,
+      MITM_PROXY_PORT: String(port),
+    },
+  });
+  proxyProcess.unref();
+  if (logFd !== null) { try { fs.closeSync(logFd); } catch { /* ignore */ } }
+  proxyPid = proxyProcess.pid;
+  try { fs.writeFileSync(PROXY_PID_FILE, String(proxyPid)); } catch { /* best effort */ }
+  proxyProcess.on("exit", () => {
+    proxyProcess = null;
+    proxyPid = null;
+    try { fs.rmSync(PROXY_PID_FILE, { force: true }); } catch { /* ignore */ }
+  });
+
+  // Wait for it to actually accept. A refused connect returns instantly, so
+  // this needs its own delay -- without one the whole loop finishes in
+  // microseconds and reports a port that is not listening yet.
+  for (let i = 0; i < 50; i++) {
+    if (await isPortAccepting(port, 200)) break;
+    if (proxyProcess === null) break; // exited; the exit handler cleared it
+    await new Promise((r) => setTimeout(r, 100));
+  }
+
+  const status = await getProxyCaptureStatus();
+  if (!status.running) {
+    // Deliberately not recorded as enabled: a start that failed is not a state
+    // to restore on the next boot, it is a state to leave alone.
+    throw new Error(`Proxy did not start on port ${port}: ${lastProxyLogLine() || "no output"}`);
+  }
+  await saveProxyCaptureEnabled(true);
+  return status;
+}
+
+async function stopProxyCapture() {
+  const port = proxyPort();
+
+  // The pid file is the only thing a proxy from a previous app run leaves
+  // behind -- there is no system state to undo, which is the whole advantage
+  // of this transport over the DNS one.
+  let filePid = null;
+  try { filePid = Number(fs.readFileSync(PROXY_PID_FILE, "utf-8").trim()) || null; } catch { /* none */ }
+
+  const signal = (sig) => {
+    if (proxyProcess && !proxyProcess.killed) {
+      try { proxyProcess.kill(sig); } catch { /* ignore */ }
+    }
+    if (filePid && isProcessAlive(filePid)) killProcess(filePid, sig === "SIGKILL");
+  };
+
+  // Signals are asynchronous: checking the port immediately after kill() reports
+  // "still running" for a process that is about to exit. Wait for the port to
+  // actually stop accepting, then escalate rather than reporting a lie.
+  signal("SIGTERM");
+  let closed = false;
+  for (let i = 0; i < 30; i++) {
+    if (!(await isPortAccepting(port, 150))) { closed = true; break; }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  if (!closed) {
+    signal("SIGKILL");
+    for (let i = 0; i < 20; i++) {
+      if (!(await isPortAccepting(port, 150))) break;
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+
+  proxyProcess = null;
+  proxyPid = null;
+  try { fs.rmSync(PROXY_PID_FILE, { force: true }); } catch { /* ignore */ }
+  // Turning it off is as much a decision as turning it on, so it has to be
+  // recorded too — otherwise the next boot helpfully starts it again.
+  await saveProxyCaptureEnabled(false);
+  return getProxyCaptureStatus();
+}
+
+/**
+ * The two capture transports are one switch.
+ *
+ * They used to start and stop independently, and the states that produced were
+ * worse than either transport being off. The proxy is spawned detached and
+ * unref'd so it outlives the app: stop MITM, or kill the app, and the proxy kept
+ * listening on 20129 with nothing behind it. Measured in that state — the port
+ * accepts, `/_krouter_proxy_health` answers `{"ok":true}`, and every intercepted
+ * request dies with `500 {"error":{"message":"fetch failed"}}` because the
+ * router it forwards to is gone. Anything pointed at HTTPS_PROXY then breaks for
+ * reasons that look like a network fault, which is exactly how it was reported.
+ *
+ * Best effort on purpose: the :443 transport is useful on its own, so a proxy
+ * that will not come up must not fail a MITM start that already succeeded.
+ */
+async function startProxyWithMitm(apiKey) {
+  try {
+    const status = await startProxyCapture(apiKey);
+    log(`🔀 Proxy capture ${status.alreadyRunning ? "already listening" : "started"} on ${status.proxyUrl}`);
+  } catch (e) {
+    err(`Proxy capture did not start alongside MITM: ${e.message}`);
+  }
+}
+
+/** The other half of the switch. Never throws, for the same reason. */
+async function stopProxyWithMitm() {
+  try {
+    const status = await stopProxyCapture();
+    if (status.running) err(`Proxy capture is still listening on port ${status.port} after a stop`);
+    else log("🔀 Proxy capture stopped");
+  } catch (e) {
+    err(`Proxy capture did not stop alongside MITM: ${e.message}`);
+  }
+}
+
 async function getMitmStatus() {
   let running = serverProcess !== null && !serverProcess.killed;
   let pid = serverPid;
@@ -392,6 +776,11 @@ async function getMitmStatus() {
         }
       }
     } catch { /* ignore */ }
+  }
+
+  // 0.5.173 — last resort before declaring it down: ask the port. See isPortAccepting.
+  if (!running && await isPortAccepting(MITM_LOCAL_PORT)) {
+    running = true;
   }
 
   const dnsStatus = checkAllDNSStatus();
@@ -509,6 +898,9 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
           log(`♻️ Reusing existing process (PID: ${savedPid})`);
           await saveMitmSettings(true, sudoPassword);
           if (sudoPassword) setCachedPassword(sudoPassword);
+          // Also on this path: a MITM that was already up can still have been
+          // left without its proxy, and the toggle has to converge both.
+          await startProxyWithMitm(apiKey);
           return { running: true, pid: savedPid };
         } else {
           fs.unlinkSync(PID_FILE);
@@ -526,10 +918,28 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
   try {
     fs.writeFileSync(LOCK_FILE, String(process.pid), { flag: "wx" });
   } catch (e) {
-    if (e.code === "EEXIST") {
-      throw new Error("MITM server is already starting (lock contention)");
-    }
-    throw e;
+    if (e.code !== "EEXIST") throw e;
+    // A lock only means something while the process holding it is alive.
+    //
+    // It is removed on every clean path, but not by a SIGKILL — `launchctl
+    // kickstart -k`, a crash, a power cut — and the bare throw below then made
+    // EVERY later start fail with "already starting". Not until the next boot:
+    // forever, because nothing ever deleted the file. Observed here as
+    // "[InitApp] MITM auto-start failed: MITM server is already starting (lock
+    // contention)" with the lock naming a pid that had been dead for minutes.
+    const holder = (() => {
+      try { return parseInt(fs.readFileSync(LOCK_FILE, "utf8").trim(), 10) || null; } catch { return null; }
+    })();
+    const ageMs = (() => {
+      try { return Date.now() - fs.statSync(LOCK_FILE).mtimeMs; } catch { return Infinity; }
+    })();
+    // The age check is the backstop for a recycled pid: a start that is genuinely
+    // in flight finishes or fails well inside this window, so a lock older than
+    // that is not a start in progress whoever owns the number now.
+    const live = holder && isProcessAlive(holder) && ageMs < STALE_LOCK_MS;
+    if (live) throw new Error("MITM server is already starting (lock contention)");
+    log(`🔓 Reclaiming a stale start lock (pid ${holder ?? "unknown"}, age ${Math.round(ageMs / 1000)}s)`);
+    fs.writeFileSync(LOCK_FILE, String(process.pid));
   }
 
   try {
@@ -644,21 +1054,46 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
 
     if (_updateSettings) await _updateSettings({ mitmCertInstalled: true }).catch(() => { });
   } else if (isSudoAvailable()) {
-    // Pass HOME explicitly so os.homedir() resolves to the unprivileged user's home
-    // instead of /root when sudo resets the environment.
+    // The environment goes down stdin, not argv.
+    //
+    // Two reasons. argv is world-readable: `ROUTER_API_KEY=sk-...` on the
+    // command line showed the key to every local process in `ps`. And the old
+    // inline list was a fixed four variables, so MITM_FILE_LOG and DEBUG_MITM
+    // never reached the child on macOS — file logging looked enabled and wrote
+    // nothing, which is the worst way for an observability switch to fail.
+    //
+    // HOME is in the list because sudo resets it; without it os.homedir()
+    // resolves to /root and the server writes its state to the wrong place.
+    const childEnv = {
+      HOME: os.homedir(),
+      NODE_ENV: "production",
+      ROUTER_API_KEY: apiKey,
+      MITM_ROUTER_BASE: mitmRouterBase,
+    };
+    // Forwarded only when set, so an unset var stays unset in the child rather
+    // than arriving as the empty string, which several of these treat as on.
+    for (const k of SUDO_FORWARDED_ENV) {
+      if (process.env[k] != null && process.env[k] !== "") childEnv[k] = process.env[k];
+    }
+
+    // Read past whatever sudo did or did not consume before taking the vars.
+    //
+    // `sudo -S` reads the password line only when it actually prompts; with a
+    // cached timestamp or NOPASSWD it reads nothing, and a script that blindly
+    // took the first line would then export the password as the API key and
+    // fail in a way that reads like a bad key. Skipping to a sentinel is
+    // correct either way.
     const inlineCmd = [
-      `HOME=${shellQuoteSingle(os.homedir())}`,
-      `ROUTER_API_KEY=${shellQuoteSingle(apiKey)}`,
-      `MITM_ROUTER_BASE=${shellQuoteSingle(mitmRouterBase)}`,
-      "NODE_ENV=production",
-      shellQuoteSingle(process.execPath),
-      shellQuoteSingle(effectiveServerPath),
-    ].join(" ");
+      `while IFS= read -r l; do [ "$l" = "${ENV_BEGIN}" ] && break; done`,
+      `while IFS= read -r l; do [ "$l" = "${ENV_END}" ] && break; export "$l"; done`,
+      `exec ${shellQuoteSingle(process.execPath)} ${shellQuoteSingle(effectiveServerPath)}`,
+    ].join("; ");
+
     serverProcess = spawn(
       "sudo", ["-S", "-E", "sh", "-c", inlineCmd],
       { detached: false, windowsHide: true, stdio: ["pipe", "pipe", "pipe"] }
     );
-    serverProcess.stdin.write(`${sudoPassword}\n`);
+    serverProcess.stdin.write(buildSudoEnvStdin(sudoPassword, childEnv));
     serverProcess.stdin.end();
   } else {
     // Docker/minimal images: no sudo — same as Windows-style direct spawn
@@ -687,7 +1122,29 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
   // MITM cert. Node ignores the OS trust store and reads its own bundled
   // Mozilla CA list — without this, system curl works but Node-based apps
   // reject our cert with 'x509: certificate signed by unknown authority'.
-  if (IS_MAC) {
+  // 0.5.169 — NODE_EXTRA_CA_CERTS covers Node/Electron only. Antigravity's language
+  // server is Go: it reads neither the OS store nor that variable, and fails sign-in
+  // with "x509: certificate signed by unknown authority" the moment DNS points at us.
+  // Write its own setting too, on every platform.
+  // 0.5.170 — only the real installation writes machine-wide trust. See IS_DEFAULT_DATA_DIR.
+  if (!IS_DEFAULT_DATA_DIR) {
+    log(`[ide-ca] Skipped: DATA_DIR is not the default install, so machine-wide CA trust is left alone`);
+  } else {
+    try {
+      const caPath = path.join(MITM_DIR, "rootCA.crt");
+      const ide = configureIdeCaTrust(caPath);
+      for (const w of ide.written) log(`[ide-ca] ${w} -> kRouter root CA`);
+      for (const x of ide.failed) log(`[ide-ca] ${x}`);
+    } catch (e) { log(`[ide-ca] Failed: ${e.message}`); }
+  }
+
+  // 0.5.170 — same gate as the per-IDE settings above: NODE_EXTRA_CA_CERTS is set for
+  // the whole login session and points at an absolute path inside DATA_DIR, so a second
+  // instance run against a scratch DATA_DIR would repoint every Electron app on the
+  // machine at a certificate under /tmp. See IS_DEFAULT_DATA_DIR in paths.js.
+  if (!IS_DEFAULT_DATA_DIR) {
+    log(`[node-ca] Skipped: DATA_DIR is not the default install, so NODE_EXTRA_CA_CERTS is left alone`);
+  } else if (IS_MAC) {
     const rootCAPath = path.join(MITM_DIR, "rootCA.crt");
     if (fs.existsSync(rootCAPath)) {
       exec(`launchctl setenv NODE_EXTRA_CA_CERTS "${rootCAPath}"`, { windowsHide: true }, (e) => {
@@ -703,7 +1160,33 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
         else log(`[setx] NODE_EXTRA_CA_CERTS set for current user`);
       });
     }
-  } else if (IS_LINUX) {
+  }
+
+  // Go CLIs read SSL_CERT_FILE, not NODE_EXTRA_CA_CERTS, and it REPLACES the
+  // system trust store instead of adding to it. Without this, Antigravity's agy
+  // rejects the MITM cert on a machine where anything already exported that
+  // variable -- which is how "Antigravity pins its CA" got into this codebase as
+  // a fact. Unix only: on Windows Go uses the cert store certutil already filled.
+  if (!IS_WIN) {
+    const rootCAPath = path.join(MITM_DIR, "rootCA.crt");
+    if (fs.existsSync(rootCAPath)) {
+      try {
+        const res = setGoSslCertFile(rootCAPath, MITM_DIR);
+        if (res.skipped) {
+          log(`[go-ca] SSL_CERT_FILE not wired: ${res.skipped}`);
+        } else if (res.written.length > 0) {
+          log(`[go-ca] SSL_CERT_FILE -> ${res.bundlePath} (${res.certCount} certs) in ${res.written.length} file(s)`);
+          log(`[go-ca] ⚠ Already-running Go tools keep the old value: restart them (Antigravity: Quit + reopen)`);
+        } else {
+          log(`[go-ca] SSL_CERT_FILE already wired, no changes needed`);
+        }
+      } catch (e) {
+        log(`[go-ca] Failed to wire SSL_CERT_FILE: ${e.message}`);
+      }
+    }
+  }
+
+  if (IS_LINUX) {
     const rootCAPath = path.join(MITM_DIR, "rootCA.crt");
     if (fs.existsSync(rootCAPath)) {
       try {
@@ -777,6 +1260,10 @@ async function startServer(apiKey, sudoPassword, forceKillPort443 = false) {
   // Server is healthy — remove lock file (PID file persists as the marker)
   try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
 
+  // One switch: the proxy transport comes up with the DNS one. Started after
+  // :443 is healthy so a failure here cannot be mistaken for a failed MITM.
+  await startProxyWithMitm(apiKey);
+
   return { running: true, pid: serverPid };
   } catch (e) {
     // Clean up lock on any failure
@@ -793,6 +1280,11 @@ async function stopServer(sudoPassword) {
   mitmIsRestarting = true;
   mitmRestartCount = 0;
   log("⏹ Stopping server...");
+
+  // One switch: the proxy goes down with the DNS transport. First, so that the
+  // window where a proxy is listening without the rest of capture behind it is
+  // as short as possible rather than permanent.
+  await stopProxyWithMitm();
 
   // Kill server process
   const proc = serverProcess;
@@ -841,27 +1333,12 @@ async function stopServer(sudoPassword) {
     await removeAllDNSEntries(sudoPassword);
   }
 
-  // Unset NODE_EXTRA_CA_CERTS so apps don't keep trusting stale MITM cert
-  if (IS_MAC) {
-    exec(`launchctl unsetenv NODE_EXTRA_CA_CERTS`, { windowsHide: true }, (e) => {
-      if (e) log(`[launchctl] Failed to unset NODE_EXTRA_CA_CERTS: ${e.message}`);
-      else log(`[launchctl] NODE_EXTRA_CA_CERTS unset`);
-    });
-  } else if (IS_WIN) {
-    exec(`reg delete HKCU\\Environment /F /V NODE_EXTRA_CA_CERTS`, { windowsHide: true }, (e) => {
-      if (e) log(`[reg] Failed to unset NODE_EXTRA_CA_CERTS: ${e.message}`);
-      else log(`[reg] NODE_EXTRA_CA_CERTS unset`);
-    });
-  } else if (IS_LINUX) {
-    try {
-      const removed = unsetLinuxNodeExtraCaCerts();
-      if (removed.length > 0) {
-        log(`[linux-node-ca] NODE_EXTRA_CA_CERTS removed from ${removed.length} shell rc file(s)`);
-      }
-    } catch (e) {
-      log(`[linux-node-ca] Failed to unset NODE_EXTRA_CA_CERTS: ${e.message}`);
-    }
-  }
+  // 0.5.169 — CA trust is deliberately NOT torn down here. It used to be, and that is
+  // what forced the "restart every IDE" dance: a tool launched while MITM was off had
+  // no NODE_EXTRA_CA_CERTS and no antigravity.caCertificates, so the next time MITM
+  // came up its TLS failed until the user restarted it. Trust is inert while MITM is
+  // off - nothing resolves to us, so our cert is never presented - and it is removed
+  // when the root CA itself is uninstalled.
 
   try { fs.unlinkSync(PID_FILE); } catch { /* ignore */ }
   try { fs.unlinkSync(LOCK_FILE); } catch { /* ignore */ }
@@ -916,7 +1393,15 @@ const startMitm = startServer;
 const stopMitm = stopServer;
 
 module.exports = {
+  buildSudoEnvStdin,
+  SUDO_FORWARDED_ENV,
+  ENV_BEGIN,
+  ENV_END,
   getMitmStatus,
+  startProxyCapture,
+  stopProxyCapture,
+  getProxyCaptureStatus,
+  PROXY_DEFAULT_PORT,
   startServer,
   stopServer,
   enableToolDNS,
@@ -935,4 +1420,7 @@ module.exports = {
   hasDnsPrivilege,
   removeAllDNSEntries,
   removeAllDNSEntriesSync,
+  // The sudo-password crypto, so a test can prove the key does not depend on
+  // PATH. It silently did, and MITM auto-start was off on every boot for it.
+  __test__: { encryptPassword, decryptPassword, deriveKeyCandidates },
 };

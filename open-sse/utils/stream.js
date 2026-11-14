@@ -1,4 +1,5 @@
 import { translateResponse, initState } from "../translator/index.js";
+import { clientWantsDoneSentinel } from "./sseConstants.js";
 import { FORMATS } from "../translator/formats.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
 import { extractUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
@@ -86,6 +87,17 @@ export function createSSEStream(options = {}) {
   let openAIResponsesTerminalSeen = false;
   let openAIResponsesDoneSent = false;
 
+  // Google's streamGenerateContent?alt=sse has no [DONE] sentinel — the stream just
+  // ends. Antigravity's `agy` parses every data: line as JSON, so the OpenAI-style
+  // sentinel makes it fail AFTER it has already rendered the answer, surfacing as
+  // "Agent execution terminated due to error" on a turn that visibly worked.
+  // sourceFormat is the CLIENT here, not targetFormat. translateResponse is called
+  // as (targetFormat, sourceFormat) against register(from, to), so an antigravity
+  // client registers OPENAI -> ANTIGRAVITY: from=targetFormat, to=sourceFormat.
+  // Guarding on targetFormat looked right, passed a test that repeated the same
+  // inversion, shipped, and changed nothing -- the sentinel kept going out.
+  const omitsDoneSentinel = !clientWantsDoneSentinel(sourceFormat);
+
   // The Responses API has no [DONE] sentinel. Codex closes the socket the moment it
   // sees the terminal event, which cancels the reader -- so flush() never runs and the
   // request bills nothing. Record usage at the terminal event too, once-guarded so the
@@ -106,7 +118,15 @@ export function createSSEStream(options = {}) {
     }
 
     if (hasValidUsage(finalUsage)) {
-      logUsage(isPassthrough ? provider : (state?.provider || targetFormat), finalUsage, model, connectionId, apiKey);
+      // onStreamComplete routes to saveUsageStats, which records this turn with
+      // its captured tool. Recording here as well is what double-counted every
+      // stream; see logUsage. Without that callback nothing else records, so the
+      // write stays (tool-less — this path has no client request in scope).
+      logUsage(
+        isPassthrough ? provider : (state?.provider || targetFormat),
+        finalUsage, model, connectionId, apiKey,
+        { record: !onStreamComplete }
+      );
     } else {
       appendRequestLog({ model, provider, connectionId, tokens: null, status: "200 OK" }).catch(() => { });
     }
@@ -284,10 +304,12 @@ export function createSSEStream(options = {}) {
             sseEmittedCount++;
           }
 
-          const output = "data: [DONE]\n\n";
-          reqLogger?.appendConvertedChunk?.(output);
-          controller.enqueue(sharedEncoder.encode(output));
-          if (keepsOpenAIResponsesFormat) openAIResponsesDoneSent = true;
+          if (!omitsDoneSentinel) {
+            const output = "data: [DONE]\n\n";
+            reqLogger?.appendConvertedChunk?.(output);
+            controller.enqueue(sharedEncoder.encode(output));
+            if (keepsOpenAIResponsesFormat) openAIResponsesDoneSent = true;
+          }
           continue;
         }
 
@@ -426,9 +448,11 @@ export function createSSEStream(options = {}) {
           // Some clients (e.g. OpenClaw) expect the OpenAI-style sentinel:
           //   data: [DONE]\n\n
           // Without it they can hang until timeout and trigger failover.
-          const doneOutput = "data: [DONE]\n\n";
-          reqLogger?.appendConvertedChunk?.(doneOutput);
-          controller.enqueue(sharedEncoder.encode(doneOutput));
+          if (!omitsDoneSentinel) {
+            const doneOutput = "data: [DONE]\n\n";
+            reqLogger?.appendConvertedChunk?.(doneOutput);
+            controller.enqueue(sharedEncoder.encode(doneOutput));
+          }
 
           finalizeStream();
           return;
@@ -497,7 +521,7 @@ export function createSSEStream(options = {}) {
           openAIResponsesTerminalSeen = true;
         }
 
-        if (!keepsOpenAIResponsesFormat || !openAIResponsesDoneSent) {
+        if (!omitsDoneSentinel && (!keepsOpenAIResponsesFormat || !openAIResponsesDoneSent)) {
           const doneOutput = "data: [DONE]\n\n";
           reqLogger?.appendConvertedChunk?.(doneOutput);
           controller.enqueue(sharedEncoder.encode(doneOutput));

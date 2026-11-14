@@ -3,8 +3,16 @@
 import { useState } from "react";
 import { usePathname } from "next/navigation";
 import { useNotificationStore } from "@/store/notificationStore";
+import { Icon } from "../icons";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
+import {
+  SHELL_GUTTER_X,
+  SHELL_PAD_Y,
+  SHELL_SCROLL,
+  isFullBleed,
+  shellTrackClass,
+} from "@/shared/constants/pageShell";
 
 function getToastStyle(type) {
   if (type === "success") {
@@ -36,6 +44,7 @@ export default function DashboardLayout({ children }) {
   const pathname = usePathname();
   const notifications = useNotificationStore((state) => state.notifications);
   const removeNotification = useNotificationStore((state) => state.removeNotification);
+  const fullBleed = isFullBleed(pathname);
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-bg">
@@ -48,7 +57,7 @@ export default function DashboardLayout({ children }) {
               className={`rounded-lg border px-3 py-2 shadow-lg backdrop-blur-sm ${style.wrapper}`}
             >
               <div className="flex items-start gap-2">
-                <span className="material-symbols-outlined text-[18px] leading-5">{style.icon}</span>
+                <Icon name={style.icon} size={18} className="mt-[1px] shrink-0" />
                 <div className="min-w-0 flex-1">
                   {n.title ? <p className="text-xs font-semibold mb-0.5">{n.title}</p> : null}
                   <p className="text-xs whitespace-pre-wrap break-words">{n.message}</p>
@@ -60,7 +69,7 @@ export default function DashboardLayout({ children }) {
                     className="text-current/70 hover:text-current"
                     aria-label="Dismiss notification"
                   >
-                    <span className="material-symbols-outlined text-[16px]">close</span>
+                    <Icon name="close" size={16} />
                   </button>
                 ) : null}
               </div>
@@ -95,8 +104,19 @@ export default function DashboardLayout({ children }) {
         {/* Faint grid background */}
         <div className="landing-grid absolute inset-0 pointer-events-none -z-10" aria-hidden="true" />
         <Header key={pathname} onMenuClick={() => setSidebarOpen(true)} />
-        <div className={`flex-1 overflow-y-auto custom-scrollbar ${pathname === "/dashboard/basic-chat" ? "" : "p-6 lg:p-10"} ${pathname === "/dashboard/basic-chat" ? "flex flex-col overflow-hidden" : ""}`}>
-          <div className={`${pathname === "/dashboard/basic-chat" ? "flex-1 w-full h-full flex flex-col" : "max-w-7xl mx-auto"}`}>{children}</div>
+        {/* The gutter and width come from pageShell.js so the header above
+            resolves to the same left edge. Pages must not set either; see
+            tests/unit/dashboard-shell-is-one-track.test.js. */}
+        <div
+          className={
+            fullBleed
+              ? "flex flex-1 flex-col overflow-hidden"
+              : `flex-1 ${SHELL_SCROLL} ${SHELL_GUTTER_X} ${SHELL_PAD_Y}`
+          }
+        >
+          <div className={fullBleed ? "flex h-full w-full flex-1 flex-col" : shellTrackClass(pathname)}>
+            {children}
+          </div>
         </div>
       </main>
     </div>

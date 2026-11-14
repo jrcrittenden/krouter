@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawn, exec, execSync } = require("child_process");
+const { spawn, exec, execSync, execFileSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
@@ -504,6 +504,58 @@ function isOwnServerPid(pid) {
   return false;
 }
 
+// Ask the port who it is, rather than inferring from process metadata.
+//
+// isOwnServerPid() compares the holder's cwd against standaloneDir. That breaks
+// permanently the moment the directory is renamed -- which npm does on every
+// upgrade (it stages into .krouter-XXXX and renames it into place) and which the
+// auto-updater does too. A server still running across an upgrade then has a cwd
+// pointing at a name that no longer exists, the compare fails, and kRouter tells
+// the user their own server is a foreign process and refuses to start. Observed
+// on a real `npm install -g @sifxprime/krouter@latest` with 0.5.174 running:
+//   holder cwd    : .../@sifxprime/.krouter-rqcc3q2I/app   (dir since deleted)
+//   standaloneDir : .../@sifxprime/krouter/app
+//   message       : "Port 20128 is held by next-server (pid 47515) - not kRouter"
+//
+// /api/version is unauthenticated and names the package, so one request settles
+// it wherever the binary now lives. Same lesson as the MITM liveness probe in
+// 0.5.173: ask the thing, do not deduce it from how it looks.
+const PORT_IDENTITY_PROBE = `
+  const http = require("http");
+  const req = http.get(
+    { host: "127.0.0.1", port: Number(process.argv[1]), path: "/api/version", timeout: 2500 },
+    (res) => {
+      let d = "";
+      res.on("data", (c) => (d += c));
+      res.on("end", () => {
+        try {
+          process.stdout.write(JSON.parse(d).packageName === "@sifxprime/krouter" ? "yes" : "no");
+        } catch { process.stdout.write("no"); }
+      });
+    }
+  );
+  req.on("timeout", () => { req.destroy(); process.stdout.write("no"); });
+  req.on("error", () => process.stdout.write("no"));
+`;
+
+function portServesKrouter(port) {
+  try {
+    // execFileSync, not execSync: a shell would mangle the script. Passing it
+    // through `sh -c` means JSON-escaping it, and the two characters \\n then
+    // reach node where real newlines belong -- a SyntaxError that this catch
+    // would swallow, returning false and silently restoring the very bug this
+    // function exists to fix.
+    const out = execFileSync(
+      process.execPath,
+      ["-e", PORT_IDENTITY_PROBE, String(port)],
+      { encoding: "utf8", timeout: 6000, stdio: ["pipe", "pipe", "ignore"] }
+    ).trim();
+    return out === "yes";
+  } catch {
+    return false;
+  }
+}
+
 // Kill ALL processes listening on the given port. Returns true if any were killed.
 // Previous version: on Windows only killed the first PID from netstat, missing
 // parent/child pairs (next-server has a watcher + worker). Now sweeps all PIDs.
@@ -514,6 +566,12 @@ function killProcessOnPort(port) {
       const platform = process.platform;
       const pidsToKill = new Set();
       const foreign = [];
+      // One request, before the pid loop: does the port answer as kRouter?
+      // On its own that is NOT a licence to kill every pid lsof returns --
+      // `lsof -ti:PORT` also lists processes merely CONNECTED to the port, so
+      // trusting it alone would kill the browser tab on the dashboard, or an
+      // IDE mid-request. It is combined below with "is actually listening".
+      const portIsOurs = portServesKrouter(port);
 
       if (platform === "win32") {
         try {
@@ -526,7 +584,9 @@ function killProcessOnPort(port) {
           output.split('\n').filter(l => l.includes('LISTENING')).forEach(line => {
             const pid = line.trim().split(/\s+/).pop();
             if (!pid || !/^\d+$/.test(pid) || pid === String(process.pid)) return;
-            if (isOwnServerPid(pid)) pidsToKill.add(pid);
+            // Safe to trust portIsOurs here without a listener check of its own:
+            // the netstat filter above already kept only LISTENING rows.
+            if (portIsOurs || isOwnServerPid(pid)) pidsToKill.add(pid);
             else foreign.push(pid);
           });
           for (const pid of pidsToKill) {
@@ -545,12 +605,23 @@ function killProcessOnPort(port) {
             encoding: 'utf8',
             stdio: ['pipe', 'pipe', 'ignore']
           }).trim();
+          // Only the listener owns the port; everything else in that list is a
+          // client of it. Reclaiming the port never requires killing a client.
+          let listeners = new Set();
+          try {
+            listeners = new Set(
+              execSync(`lsof -ti:${port} -sTCP:LISTEN`, {
+                encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'],
+              }).trim().split('\n').filter(Boolean)
+            );
+          } catch { /* none listening */ }
           pidOutput.split('\n').filter(Boolean).forEach(pid => {
             if (pid === String(process.pid)) return;
             // Only ever kill our own server. Anything else holding the port is the
             // user's — say so and let them choose the port, rather than killing it.
-            if (isOwnServerPid(pid)) pidsToKill.add(pid);
-            else foreign.push(pid);
+            const ours = (portIsOurs && listeners.has(pid)) || isOwnServerPid(pid);
+            if (ours) pidsToKill.add(pid);
+            else if (listeners.has(pid)) foreign.push(pid);
           });
           for (const pid of pidsToKill) {
             try {
@@ -721,29 +792,62 @@ async function showInterfaceMenu(latestVersion) {
     serverUrl = `http://${displayHost}:${port}`;
   }
 
-  const subtitle = `🚀 Server: \x1b[32m${serverUrl}\x1b[0m`;
+  // Say what state the user is actually in. The menu used to show the URL and
+  // nothing else, so "Hide to Tray" was a guess: no way to see whether a
+  // background service already existed, or whether the last attempt worked.
+  let bg = { mode: "unknown" };
+  try {
+    const { backgroundMode } = require("./src/cli/tray/status");
+    bg = backgroundMode(port);
+  } catch (e) { /* status is a nicety; never block the menu on it */ }
+
+  let whereLine;
+  try {
+    const { describeBackground } = require("./src/cli/tray/status");
+    whereLine = describeBackground(bg);
+  } catch (e) {
+    whereLine = "";
+  }
+
+  const updateLine = latestVersion
+    ? `\x1b[33m⬆ v${latestVersion} available\x1b[0m (you have v${pkg.version})`
+    : `\x1b[90m✓ v${pkg.version} is the latest\x1b[0m`;
+
+  const subtitle = [
+    `🚀 Server:  \x1b[32m${serverUrl}\x1b[0m`,
+    `   Status:  ${whereLine}`,
+    `   Update:  ${updateLine}`,
+  ].join("\n");
 
   const menuItems = [];
 
   if (latestVersion) {
-    menuItems.push({ label: `Update to v${latestVersion} (current: v${pkg.version})`, icon: "⬆" });
+    menuItems.push({ label: `Update to v${latestVersion}`, icon: "⬆" });
   }
 
   menuItems.push(
     { label: "Web UI (Open in Browser)", icon: "🌐" },
     { label: "Terminal UI (Interactive CLI)", icon: "💻" },
-    { label: "Hide to Tray + Start on Login", icon: "🔔" },
-    { label: "Exit", icon: "🚪" }
   );
 
-  const selected = await selectMenu(`Choose Interface (v${pkg.version})`, menuItems, 0, subtitle);
+  // The background item describes what it will DO from here, instead of naming
+  // an implementation detail the user has to guess the consequences of.
+  const alreadyBackground = bg.mode === "launchd" || bg.mode === "detached";
+  menuItems.push(
+    alreadyBackground
+      ? { label: "Already in background — leave it running and quit this menu", icon: "✓" }
+      : { label: "Run in background (keeps running when you close this terminal)", icon: "🔔" },
+    { label: alreadyBackground ? "Stop kRouter completely" : "Exit (stops kRouter)", icon: "🚪" }
+  );
+
+  const selected = await selectMenu(`kRouter v${pkg.version}`, menuItems, 0, subtitle);
 
   const offset = latestVersion ? 1 : 0;
 
   if (latestVersion && selected === 0) return "update";
   if (selected === offset) return "web";
   if (selected === offset + 1) return "terminal";
-  if (selected === offset + 2) return "hide";
+  if (selected === offset + 2) return alreadyBackground ? "detach" : "hide";
   return "exit";
 }
 
@@ -847,6 +951,11 @@ function startServer(latestVersion) {
 
   // Suppress all errors during shutdown (systray lib throws JSON parse errors)
   let isShuttingDown = false;
+  // Set while the server is being handed to launchd / a detached child. The
+  // close handler must not treat that deliberate kill as a crash: it printed
+  // "Server exited (code=unknown). Restarting in 1s..." over a handoff that was
+  // working, and the respawn it scheduled raced the new owner for the port.
+  let isHandingOff = false;
   process.on("uncaughtException", (err) => {
     if (isShuttingDown) return;
     console.error("Error:", err.message);
@@ -879,6 +988,10 @@ function startServer(latestVersion) {
       const { initTray } = require("./src/cli/tray/tray");
       initTray({
         port,
+        // The tray reads mitm/.mitm.pid from here to show whether capture is
+        // on. trayState defaults this, but passing it keeps the icon correct
+        // when kRouter runs with a non-default data dir.
+        appDataDir: getAppDataDir(),
         onQuit: () => {
           isShuttingDown = true;
           console.log("\n👋 Shutting down from tray...");
@@ -931,6 +1044,16 @@ function startServer(latestVersion) {
           await killProcessOnPort(port);
           setTimeout(() => process.exit(0), 200);
           return;
+        } else if (choice === "detach") {
+          // kRouter is already running in the background. Quitting this menu
+          // must leave it alone -- the old "Exit" path would have killed it,
+          // which is the opposite of what someone picking this wants.
+          const { clearScreen } = require("./src/cli/utils/display");
+          clearScreen();
+          console.log(`\n✅ kRouter stays running in the background.`);
+          console.log(`   Server: http://${displayHost}:${port}`);
+          console.log(`\n   To stop it later: run krouter and choose "Stop kRouter completely".\n`);
+          process.exit(0);
         } else if (choice === "web") {
           openBrowser(url);
           // Wait for user to come back
@@ -968,38 +1091,81 @@ function startServer(latestVersion) {
           }
 
           if (process.platform === "darwin") {
-            // macOS: keep current process alive — spawning a detached child puts
-            // it outside the login session so NSStatusItem silently fails.
+            // Hand the server to launchd so it outlives this terminal. Keeping
+            // the foreground process alive (what this used to do) meant closing
+            // the terminal killed kRouter, while the message said otherwise --
+            // and the autostart plist had already lost a port race against us.
+            isHandingOff = true;
+            const { handOffToLaunchd } = require("./src/cli/tray/handoff");
+            const handoff = startsOnLogin
+              ? await handOffToLaunchd({
+                port,
+                // cleanup() stops OUR server (and tray/mitm/tunnel pid files)
+                // and nothing else. killAllAppProcesses() must not be used
+                // here: it kills every kRouter process on the machine,
+                // including this one mid-handoff and the agent we are about to
+                // start.
+                stopCurrent: async () => { cleanup(); },
+                isKrouterOnPort: portServesKrouter,
+                log: (m) => console.log(`\n⏳ ${m}`),
+              })
+              : { ok: false, reason: "autostart-not-enabled" };
+
+            if (handoff.ok) {
+              console.log(`🔔 kRouter now runs in the background, owned by launchd.`);
+              console.log(`   Server: http://${displayHost}:${port}`);
+              console.log(`   Agent:  ${handoff.label}`);
+              console.log(`\n💡 Closing this terminal will NOT stop it.`);
+              console.log(`   To stop: right-click the tray icon -> Quit, or`);
+              console.log(`   launchctl bootout gui/$(id -u)/${handoff.label}\n`);
+              process.exit(0);
+            }
+
+            // Fall back to the old behaviour, but say plainly what it costs --
+            // the previous message claimed the terminal was safe to close.
             process.removeAllListeners("SIGHUP");
             process.on("SIGHUP", () => {});
 
             console.log(`\n⏳ Switching to tray mode... (icon already visible in menu bar)`);
             console.log(`🔔 kRouter is running in tray (PID: ${process.pid})`);
             console.log(`   Server: http://${displayHost}:${port}`);
-            console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
+            console.log(`\n⚠️  Could not hand off to launchd (${handoff.reason}).`);
+            console.log(`   kRouter is tied to THIS terminal — closing it stops the server.`);
+            console.log(`   Right-click the tray icon to quit.\n`);
 
             // Tray already init'd at startup — just keep event loop alive.
             return;
           }
 
-          // Windows/Linux: spawn detached bgProcess (systray works fine in child)
-          console.log(`\n⏳ Starting background process... (tray icon will appear in ~3s)`);
-
-          const bgProcess = spawn(process.execPath, [__filename, "--tray", "--skip-update", "-p", port.toString()], {
-            detached: true,
-            stdio: "ignore",
-            windowsHide: true,
-            env: { ...process.env }
+          // Windows/Linux: spawn a detached child (systray works fine in a child
+          // there). Stop ours FIRST: the child starts binding immediately, and
+          // the old order spawned it while this process still held the port.
+          isHandingOff = true;
+          const { handOffToDetachedChild } = require("./src/cli/tray/handoff");
+          const bg = await handOffToDetachedChild({
+            port,
+            cliPath: __filename,
+            spawn,
+            // Only our own server — see the macOS branch. killAllAppProcesses()
+            // here would kill this process before it could spawn the child.
+            stopCurrent: async () => { cleanup(); },
+            isKrouterOnPort: portServesKrouter,
+            log: (m) => console.log(`\n⏳ ${m}`),
           });
-          bgProcess.unref();
 
-          console.log(`🔔 kRouter is now running in background (PID: ${bgProcess.pid})`);
-          console.log(`   Server: http://${displayHost}:${port}`);
-          console.log(`\n💡 You can close this terminal. Right-click tray icon to quit.\n`);
+          if (bg.ok) {
+            console.log(`🔔 kRouter is now running in background (PID: ${bg.pid})`);
+            console.log(`   Server: http://${displayHost}:${port}`);
+            console.log(`\n💡 Closing this terminal will NOT stop it.`);
+            console.log(`   Right-click the tray icon to quit.\n`);
+            process.exit(0);
+          }
 
-          // cleanup() kills server so bgProcess can claim the port fresh
-          cleanup();
-          process.exit(0);
+          // Never claim the terminal is safe to close when it is not.
+          console.error(`\n⚠️  Could not start the background process (${bg.reason}).`);
+          console.error(`   kRouter is NOT running in the background.`);
+          console.error(`   Run \`krouter\` again, or \`krouter --tray\` directly to see the error.\n`);
+          process.exit(1);
         } else if (choice === "exit") {
           isShuttingDown = true;
           console.log("\nExiting...");
@@ -1016,12 +1182,16 @@ function startServer(latestVersion) {
 
   function attachServerEvents() {
     server.on("error", (err) => {
+      if (isHandingOff) return;
       console.error("Failed to start server:", err.message);
       if (!isShuttingDown) tryRestart();
       else { cleanup(); process.exit(1); }
     });
 
     server.on("close", (code) => {
+      // We killed it on purpose to free the port; the handoff reports the
+      // outcome itself.
+      if (isHandingOff) return;
       if (isShuttingDown || code === 0) {
         process.exit(code || 0);
         return;

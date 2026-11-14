@@ -7,6 +7,7 @@ import Drawer from "@/shared/components/Drawer";
 import Pagination from "@/shared/components/Pagination";
 import { cn } from "@/shared/utils/cn";
 import { AI_PROVIDERS, getProviderByAlias } from "@/shared/constants/providers";
+import Icon from "../../../../../shared/components/icons/Icon";
 
 let providerNameCache = null;
 let providerNodesCache = null;
@@ -62,15 +63,13 @@ function CollapsibleSection({ title, children, defaultOpen = false, icon = null 
         className="w-full flex items-center justify-between p-3 bg-black/[0.02] dark:bg-white/[0.02] hover:bg-black/[0.04] dark:hover:bg-white/[0.04] transition-colors"
       >
         <div className="flex items-center gap-2">
-          {icon && <span className="material-symbols-outlined text-[18px] text-text-muted">{icon}</span>}
+          {icon && <Icon name={icon} size={18} className="text-text-muted" />}
           <span className="font-semibold text-sm text-text-main">{title}</span>
         </div>
-        <span className={cn(
-          "material-symbols-outlined text-[20px] text-text-muted transition-transform duration-200",
+        <Icon name="chevron_right" size={20} className={cn(
+          "text-text-muted transition-transform duration-200",
           isOpen ? "rotate-90" : ""
-        )}>
-          chevron_right
-        </span>
+        )} />
       </button>
       
       {isOpen && (
@@ -238,33 +237,31 @@ export default function RequestDetailsTab() {
 
       <Card padding="none">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[880px]">
+          <table className="data-table min-w-[880px]">
             <thead>
               <tr className="border-b border-black/5 dark:border-white/5">
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Timestamp</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Model</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Provider</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Input Tokens</th>
-                <th className="text-right p-4 text-sm font-semibold text-text-main">Output Tokens</th>
-                <th className="text-left p-4 text-sm font-semibold text-text-main">Latency</th>
-                <th className="text-center p-4 text-sm font-semibold text-text-main">Action</th>
+                <th className="text-left font-semibold text-text-main">Timestamp</th>
+                <th className="text-left font-semibold text-text-main">Model</th>
+                <th className="text-left font-semibold text-text-main">Provider</th>
+                <th className="num font-semibold text-text-main">Input Tokens</th>
+                <th className="num font-semibold text-text-main">Output Tokens</th>
+                <th className="text-left font-semibold text-text-main">Latency</th>
+                <th className="text-center font-semibold text-text-main">Action</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
+                <tr className="data-table-empty">
+                  <td colSpan="7">
                     <div className="flex items-center justify-center gap-2">
-                      <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
+                      <Icon name="progress_activity" size={20} className="animate-spin" />
                       Loading...
                     </div>
                   </td>
                 </tr>
               ) : details.length === 0 ? (
-                <tr>
-                  <td colSpan="7" className="p-8 text-center text-text-muted">
-                    No request details found
-                  </td>
+                <tr className="data-table-empty">
+                  <td colSpan="7">No request details found</td>
                 </tr>
               ) : (
                 details.map((detail, index) => (
@@ -272,30 +269,30 @@ export default function RequestDetailsTab() {
                     key={`${detail.id}-${index}`}
                     className="border-b border-black/5 dark:border-white/5 last:border-b-0 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] transition-colors"
                   >
-                    <td className="whitespace-nowrap p-4 text-sm text-text-main">
+                    <td className="whitespace-nowrap text-text-main">
                       {new Date(detail.timestamp).toLocaleString()}
                     </td>
-                    <td className="max-w-[260px] truncate p-4 font-mono text-sm text-text-main">
+                    <td className="max-w-[260px] truncate font-mono text-text-main">
                       {detail.model}
                     </td>
-                    <td className="max-w-[180px] truncate p-4 text-sm text-text-main">
+                    <td className="max-w-[180px] truncate text-text-main">
                        <span className="font-medium">
                          {getProviderName(detail.provider, providerNameCache)}
                        </span>
                      </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="text-text-main num font-mono">
                       {getInputTokens(detail.tokens).toLocaleString()}
                     </td>
-                    <td className="p-4 text-sm text-text-main text-right font-mono">
+                    <td className="text-text-main num font-mono">
                       {detail.tokens?.completion_tokens?.toLocaleString() || 0}
                     </td>
-                    <td className="p-4 text-sm text-text-muted">
+                    <td className="text-text-muted">
                       <div className="flex flex-col gap-0.5">
                         <div>TTFT: <span className="font-mono">{detail.latency?.ttft || 0}ms</span></div>
                         <div>Total: <span className="font-mono">{detail.latency?.total || 0}ms</span></div>
                       </div>
                     </td>
-                    <td className="p-4 text-center">
+                    <td className="text-center">
                       <Button
                         variant="outline"
                         size="sm"
@@ -408,7 +405,7 @@ export default function RequestDetailsTab() {
                 {selectedDetail.response?.thinking && (
                   <div className="mb-4">
                     <h4 className="font-semibold text-text-main mb-2 flex items-center gap-2 text-xs uppercase tracking-wide opacity-70">
-                      <span className="material-symbols-outlined text-[16px]">psychology</span>
+                      <Icon name="psychology" size={16} />
                       Thinking Process
                     </h4>
                     <pre className="max-h-[200px] max-w-full overflow-auto rounded-lg border border-amber-200 bg-amber-50 p-3 font-mono text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100 sm:p-4">

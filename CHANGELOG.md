@@ -1,3 +1,1216 @@
+# v0.5.194 (2026-11-14) — two API routes that never shipped
+
+Reported from a real install of 0.5.192:
+
+    Error: Cannot find module
+    '/opt/homebrew/lib/node_modules/@sifxprime/krouter/app/.next-cli-build/
+     server/app/api/pxpipe/logs/route.js'
+    at Module._resolveFilename (node:internal/modules/cjs/loader:1475:15)
+
+`cli/scripts/build-cli.js` copies the Next build into the published package
+through a filter that matched on basename alone:
+
+    function shouldExclude(name) { ... return name === pattern; }
+
+One of its patterns is `logs`, meaning a runtime log directory. Next compiles
+`src/app/api/<x>/logs/route.js` to `server/app/api/<x>/logs/route.js` — a
+directory named `logs`. The copy deleted it, every check stayed green, and the
+published server threw on the first request to the endpoint.
+
+Diffing a local build against the installed package found exactly two
+casualties out of 188 routes:
+
+    /api/pxpipe/logs   added in v0.5.111, broken ever since
+    /api/usage/logs    present since the initial release, so it has never
+                       shipped once, in any version
+
+Confirmed against the published 0.5.191 tarball: zero of them present, against
+304 other API files. Not a regression — a filter and a route that had simply
+never been compared.
+
+The patterns move to `cli/scripts/exclude-patterns.js`, split by where they are
+safe to apply. A generic word like `logs` or `tmp` is a runtime artefact at the
+top of a package and a legitimate URL segment inside compiled route output, so
+it cannot be matched in both places by one rule; `shouldExclude` now takes the
+directory being copied and spares `server/app`. Everything that is never a
+route segment — sharp, `.env*`, `*.nft.json`, and `.build-home`, which once
+leaked a jwt-secret identical for every installer — is still dropped
+everywhere.
+
+Nothing compared the routes that exist against the routes that ship, which is
+how a whole endpoint stayed missing for the life of the project.
+`tests/unit/cli-bundle-keeps-every-route.test.js` does that now; re-introducing
+the single-list filter makes it name both lost routes.
+
+Verified by running the real CLI build: both routes present in the bundle,
+route count 156 to 156 with nothing dropped, and zero jwt-secret, machine-id,
+`.build-home` or `*.sqlite*` files in the output.
+
+# v0.5.193 (2026-11-14) — the Chat page is reachable
+
+`/dashboard/basic-chat` has existed since the initial release and nothing ever
+linked to it. Not the sidebar, not any other page — the only way to open it was
+to type the URL.
+
+`tests/unit/sidebar-nav-coverage.test.js` exists for exactly this. It was
+written after v0.5.111 added the Token Saver page by overwriting the MITM line
+in the sidebar instead of inserting beside it, which left MITM serving 200 and
+unreachable until a user noticed. The guard turns an orphaned page into a test
+failure.
+
+It was passing here because of an exemption:
+
+    "basic-chat": "deliberately hidden; the entry is commented out in navSections"
+
+navSections.js contains no mention of basic-chat in any form, commented or
+otherwise. The line that reason referred to was removed at some point and the
+exemption outlived it, so the guard was asserting nothing about the one page it
+excused — and an exemption whose reason has gone stale is indistinguishable
+from the orphan it is meant to excuse. That is the same failure mode the
+guard's own comment records: an older version of it scanned the component with
+a regex that matched a commented-out line, counting a route as covered while it
+was unreachable.
+
+Chat is now the last item under Route, because it is how you check the route
+you just configured actually answers. `NOT_IN_SIDEBAR` is empty, and the
+comment in its place requires any future entry to carry a reason that can be
+checked against the code.
+
+Nothing else changed. If you are coming from 0.5.191, 0.5.192 is where the
+dashboard layout work and the single capture switch landed.
+# v0.5.192 (2026-11-14) — one shell, one title, one empty state
+
+A pass over every dashboard page for layout, reported as gaps between a page's
+title and the content under it. Measured at 1440x900 before any change:
+
+    width  left   offset from the header   pages
+     1102   292                      8px   dashboard, providers, usage, combos, ...
+     1024   334                     50px   cli-tools, proxy-pools, cli-tools/[id]
+      896   395                    111px   skills, presidio
+      768   462                    178px   token-saver
+      672   507                    223px   profile, providers/new
+
+Six widths for one shell. On Settings the heading sat 223px to the left of the
+form it labelled, with roughly 430px of dead grid either side.
+
+**The geometry had two definitions.** The header bar and the scrolling content
+area are siblings, and each carried its own: the header `px-4 lg:px-8` across
+the full width, the content `p-6 lg:p-10` capped at `max-w-7xl`. That alone put
+the title block at x=284 and the content at x=292 on every page in the app.
+Pages then set widths of their own on top, and five stacked their own `p-6`/`p-8`
+on the layout's 40px so their content was inset 64-72px instead of 40.
+
+Both halves now read `src/shared/constants/pageShell.js`, which offers two
+widths rather than six. The width is chosen by route, not by the page
+component: the header renders as a sibling above `children`, so a width a page
+declared during its own render could not reach the header without a provider
+above both, and the header already derives everything else it shows from the
+pathname. A narrow route narrows the header too, so a settings form and its
+title move together.
+
+Equal padding still left 3px. The content area is a scroll container whose
+styled scrollbar is 6px of real layout width, so its usable box is narrower and
+a centred narrow track lands half that to the left — 459 against 462 on
+/dashboard/profile. The scroller now reserves that gutter permanently
+(`scrollbar-gutter: stable`, which also stops a page shifting sideways once its
+content passes one screen) and the header reserves the same by hand, both
+driven by one `--shell-scrollbar` variable that the scrollbar rule itself reads.
+
+Offset is now 0 on all 20 routes, at 390px, 1280px and 1440px.
+
+**The header bar had no slot for a page action,** so any page needing a button
+rebuilt the whole title row beneath it. Two titles on screen, and several
+disagreed:
+
+    /dashboard/providers/new        bar: "Providers"      page: "Add New Provider"
+    /dashboard/presidio             bar: "Presidio"       page: "Settings"
+    /dashboard/media-providers/web  bar: "web"            (lowercase path segment)
+    /dashboard/providers/anthropic  the name three times in ~150px
+    /dashboard/cli-tools/claude     bar: "CLI Tools" for every tool
+
+Two of those were routing bugs rather than duplication. `/providers/new` is a
+form, not a provider: the `/providers/([^/]+)$` branch matched "new", failed to
+resolve it, and fell through to the generic "Providers". `/media-providers/web`
+is a combined page for the webSearch and webFetch kinds, not a kind — the
+`[kind]` regex matched it, found nothing in MEDIA_PROVIDER_KINDS, and printed
+the raw path segment. Both now match exactly, ahead of the regex that swallowed
+them.
+
+Pages put their primary action in the bar through `<HeaderActions>`, a portal
+rather than a store: a stored React element is a snapshot, and its handlers
+would close over whatever page state existed when it was stored. Below `lg` the
+children render in place instead — with proxy-pools' three actions moved up, the
+header's content measured 666px inside a 390px box and pushed the page title and
+the theme, language and menu controls off the right edge.
+
+The bar's height no longer changes as you move between pages: it was 79px where
+a description existed and 61px on the breadcrumb routes that have none.
+
+**`.data-table-empty` was defined in globals.css and used by nothing.** All four
+tables hand-rolled a cell instead, with three paddings for the same thing —
+`py-6`, `px-6 py-8`, `p-8`. The block form was worse: eight sites across four
+paddings and three icon treatments, now one `<EmptyState>`. The one-line muted
+notes inside a card or list are deliberately left alone; wrapping "No models
+added yet" in a centred block would make it louder than the thing it annotates.
+
+Page section rhythm was 24px, 32px, or `space-y-6` — 24px again by a second
+idiom. Loading skeletons disagreed with the content they stood in for, so
+providers rendered its skeletons at 32px and its content at 24px and the page
+visibly reflowed when the data arrived.
+
+`.section-title` keeps no margin of its own, deliberately. 63 uses carry none
+and take their spacing from a parent `gap`; the 37 that set one are nearly all
+modal headings, which own their spacing. Baking a margin into the class would
+have changed the 63 that were already right.
+
+**Two bugs found on the way that are not UI.** `next dev` had served HTTP 500 on
+every route since v0.5.187: that release added `src/instrumentation.js` so the
+background bootstrap runs when the server starts, and instrumentation is
+compiled for every runtime, but the chain through bootstrap to better-sqlite3
+reaches `require('fs')`, which the edge runtime has no answer for. The
+`NEXT_RUNTIME !== "nodejs"` guard inside `register()` cannot help — it runs at
+runtime and this fails at compile time. Turbopack, Next 16's default and the
+reason `--webpack` is legacy, resolves it per runtime. `build` stays on webpack:
+the production build was never affected and the release ships from it.
+
+And `.claude/launch.json` pointed the preview server at 20129, which is
+`DEFAULT_PROXY_PORT` in `src/mitm/proxy.js`, so it could never start while proxy
+capture was running.
+
+Also in this release: the MITM tool card no longer offers a separate start/stop
+for proxy capture. Coupling the two transports in the manager was only half of
+0.5.191's fix — the card still rendered its own control, so they could be driven
+apart again from the UI and still looked like independent things.
+
+Verified against the production build throughout, because three pages never
+finish hydrating under `next dev`; that is pre-existing and was confirmed by
+reproducing it at HEAD with every change stashed.
+# v0.5.191 (2026-11-13) — captured Claude turns stop getting rejected, and capture is one switch
+
+Two bugs found from a real session's logs. Both presented as network faults and
+neither was one.
+
+**The client's Anthropic-Beta flags were being thrown away.** A beta flag
+authorises the request-body fields that depend on it, so dropping one does not
+make Anthropic ignore the field — it makes Anthropic reject the request. One
+captured Claude Code turn, four 400s in a row:
+
+    safeguards: Extra inputs are not permitted
+    thread: Extra inputs are not permitted
+    tools.50: Input tag 'advisor_20260301' ... does not match any of the expected tags
+    thinking.adaptive.display: Input should be 'summarized', 'omitted'
+
+then a fifth attempt succeeded. The body reached Anthropic untouched — the router
+logged `PASSTHROUGH claude -> claude | native lossless` — but the header
+permitting those fields did not. `anthropic-beta` was already whitelisted into
+`credentials.rawHeaders`, and nothing on the Claude path ever read it: the only
+consumers were kiro, opencode, opencode-go and cursor. The executor meanwhile
+assigned `selectAnthropicBeta(model, body)` from a hardcoded list, unconditionally.
+
+The client then degraded its feature set on each retry until a shape fit the
+flags being sent, which is why some turns worked at the cost of several rejected
+upstream calls, and why anything it could not degrade failed outright. The flags
+are now merged: ours still ship, because the OAuth flag, the Claude Code identity
+the upstream gates on, caching and the heavy-agent pair are ours to require. The
+`redact-thinking` rule is applied to the merged set, so a client sending it
+alongside `thinking.display: "summarized"` still gets its summaries.
+
+Two call sites needed this, not one. The second serves a node fronting Anthropic,
+and its own comment records this same "Extra inputs are not permitted" 400 being
+hit once before and patched by adding a single flag to the static list —
+forwarding what the client sent is what stops the next one recurring.
+
+**The two capture transports are now one switch.** They started and stopped
+independently, and the states that produced were worse than either being off.
+The proxy is spawned detached and unref'd so it outlives the app: stop MITM, or
+hard-kill the app, and the proxy kept listening on 20129 with nothing behind it.
+Measured in that state:
+
+    router on 20128: DOWN | proxy on 20129: UP
+    /_krouter_proxy_health -> {"ok":true,...}
+    intercepted request    -> HTTP 500 {"error":{"message":"fetch failed"}}
+
+So anything pointed at HTTPS_PROXY failed while the health check said everything
+was fine. Starting MITM now starts the proxy on both success paths, including the
+one that reuses an already-running server, since that case can still be missing
+its proxy. Stopping MITM stops it first, so the bad window is short rather than
+permanent. A proxy failure cannot fail a MITM start: the :443 transport is useful
+on its own.
+
+**And that health check no longer lies.** `ok` means "can serve an intercepted
+request", not "the port is open": it probes the router it forwards to, with a
+two-second timeout, and answers 503 with the reason when that is unreachable.
+Verified by recreating the orphan — hard-killing the supervisor so its cleanup
+never ran — where it previously said `{"ok":true}` and now says
+`503 {"ok":false,"routerReachable":false,"detail":"listening, but the kRouter
+server it forwards to is unreachable — intercepted requests will fail"}`.
+
+Verified live on a real install: one call up, one call down, both ports following
+together, auto-start bringing both back after a restart, and a plain curl to
+api.anthropic.com captured and answered.
+
+# v0.5.190 (2026-11-13) — first release through a configured trusted publisher
+
+No code change. Cut to exercise the npm Trusted Publisher that has just been
+configured for this package, and to find out whether a trusted publish still
+spends 55 minutes in npm's staging.
+
+Until now every release fell back to the NPM_TOKEN secret, because the OIDC
+exchange was refused:
+
+    npm refused trusted publishing for @sifxprime/krouter
+    (HTTP 404 OIDC token exchange error - package not found)
+
+The claims the workflow sends were correct all along — repository
+`sifxprime/krouter`, workflow `npm-publish.yml`, environment null, with
+`id-token: write` present — so there was nothing in this repository to change.
+npm simply had no trusted-publisher record to match them against.
+
+What this release answers, from its own log:
+
+  - `Check npm trusted publishing` printing HTTP 200 rather than 404 means npm
+    now accepts this workflow, and the token fallback is no longer in the path.
+  - How long the serve gate waits. `npm trust github` exposes `--allow-publish`
+    and `--allow-stage-publish` as separate permissions, so staging is something
+    a publisher is or is not allowed to skip — which makes the 55 minutes a
+    permissions question rather than registry load. v0.5.187 and v0.5.188 each
+    took 3301 seconds; v0.5.189 took 3299. Three releases within two seconds of
+    each other is a fixed window, not congestion.
+
+For the record, v0.5.189 was the first release where the gate added in that
+version did its job: published at 21:25:00, served at 22:20:39 after 166 polls,
+with `dist-tags.latest` moving to 0.5.189 in the same moment. A 25-minute ceiling
+would have failed a release that was fine. Nothing is wrong with the dist-tag; it
+follows the version write, and earlier reports of it lagging were registry reads
+taken inside the staging window.
+
+# v0.5.189 (2026-11-13) — a green release now means the version is installable
+
+No product change. This is the release pipeline learning the difference between
+"npm accepted the upload" and "npm serves it", which it has been getting wrong
+all day.
+
+**A staged 409 is no longer a failure.** npm holds a new publish in a staged
+state while it validates it. A staged version is not served — `npm view` 404s, so
+this workflow's own version check reports it as unpublished — but a second upload
+of it is refused:
+
+    npm error code E409
+    409 Conflict - PUT .../@sifxprime%2fkrouter
+    Cannot publish over previously staged version "0.5.183".
+
+That is the previous attempt still in flight, not a failed release, and failing on
+it is how v0.5.183's retry reported a publish npm had in fact accepted. Matched on
+the code AND the wording AND the version being released, so a 409 about any other
+version, and every other error — E404, E403, EPUBLISHCONFLICT, ENEEDAUTH, a build
+failure — still fails. The matcher is tested as shell against npm's real output in
+both directions.
+
+**Success now means the registry serves it.** A new gate polls the version
+document until it answers 200, past any CDN cache, and only then passes. This is
+the mistake that mattered: v0.5.185's publish step went green while `npm install`
+could not reach that version for hours, and it was reported as released on that
+basis. The gate also reports whether `dist-tags.latest` moved — a separate
+registry write, and the thing a plain `npm i -g` actually resolves. Observed on
+v0.5.187: served, while latest still pointed at v0.5.186.
+
+The wait is 75 minutes because v0.5.187 took 55 to appear after a green publish.
+A 25m ceiling would have failed that release and opened an issue for something
+that was fine half an hour later. The job timeout went to 110 to match; left at
+30, GitHub would have cancelled the job mid-wait and the release would have failed
+for the one reason the gate exists to describe properly. A test pins the two
+together, because nothing else in the file connects them.
+
+The issue this workflow opens on failure now separates the two causes: an upload
+that never landed (fix the Trusted Publisher) from one that landed and is staged
+(re-run to re-check, nothing needs republishing).
+
+Also added: the workflow is now checked as YAML and every `run` step parsed with
+`sh -n`. While writing this change the file was syntactically broken for a while —
+a continuation line of a shell string sat at column 0 and ended a `run: |` block
+scalar — and the whole suite stayed green, because every test read it as text.
+GitHub would only have said so on the next tag, after the release was cut.
+
+Still unfixed, and the cause of all of the above: trusted publishing is refused
+for this package (OIDC exchange 404, "package not found") so every release goes
+out through the NPM_TOKEN fallback and gets staged. That needs a Trusted Publisher
+configured on npmjs.com — owner `sifxprime`, repository `krouter`, workflow
+`npm-publish.yml`, no environment — which only the package owner can do.
+
+# v0.5.188 (2026-11-13) — proxy capture comes back after a restart too
+
+Carries v0.5.187, which npm accepted and has not served, so that version has
+never been installable.
+
+v0.5.187 made the :443 transport restart itself. The proxy transport still did
+not, and the reason it looked like it did is worth writing down: it is spawned
+detached and `unref()`ed, so it outlives the app and gets reparented to launchd.
+One found running on a real machine had been up since a session months earlier.
+Kill it once — a reboot, a crash, an unlucky pkill — and it stayed dead, because
+the only thing it ever recorded was a pid file. Nothing anywhere said it had been
+switched on.
+
+So it now has the twin of `mitmEnabled`: `proxyCaptureEnabled`, written when it
+starts, when a start finds it already running, and when it stops — but
+deliberately NOT when a start fails, because a start that did not work is not a
+state to restore on the next boot. `autoStartProxyCapture()` runs in the same
+bootstrap as the MITM one and is deliberately independent of it: no `mitmEnabled`
+gate and no sudo password, since this transport needs neither and touches no
+system state. A test asserts both absences rather than trusting the comment.
+
+The upgrade path is handled, because without it this change would have broken the
+people it is for. Anyone running proxy capture today has no `proxyCaptureEnabled`
+in settings; read as "off", their capture would quietly stop coming back. A proxy
+already accepting at boot with the setting unset is therefore adopted and
+recorded. Measured on a real install: setting null, restart, setting 1, proxy
+untouched.
+
+Verified from a cold slate — all three ports free, no krouter process, no pid or
+lock files — with launchd starting the service and nothing else touched:
+
+    20128 up at              +4s
+    443   (MITM)             +4s
+    20129 (proxy capture)    +4s
+
+Both answered a real request afterwards, DNS was restored for all three enabled
+tools, and both the proxy and the sudo/MITM chain were children of the service's
+own server process rather than anything started by hand.
+
+# v0.5.187 (2026-11-13) — the background bootstrap no longer waits for someone to log in
+
+This is the release that actually fixes MITM auto-start. v0.5.185 and v0.5.186
+fixed two things that were genuinely broken on that path and neither was ever
+reached, because `initializeApp` was not running at all.
+
+It was reachable only as a side effect of importing `app/layout.js`, which Next
+evaluates while rendering a page. `/login` is prerendered — `○ /login` in the
+build, `server/app/login.html` in the output — so it is served as static HTML
+without evaluating the layout, and `/dashboard` is redirected by middleware
+before it renders. On a boot where nobody is signed in, nothing renders a
+dynamic page, so none of this started:
+
+  - MITM auto-start (the reported symptom: capture never came back after a
+    reboot, and the watchdog then stripped the DNS redirects it could not serve)
+  - the connection watchdog and the network monitor
+  - tunnel and Tailscale auto-resume
+  - the token warmer and background quota refresh
+
+All of it was waiting for someone to open the dashboard and log in. Measured on
+the published v0.5.186: service up, `/login` 200, `/api/health` 200,
+`/dashboard` 307, and not one `[InitApp]` line in four minutes with :443 down.
+
+`src/instrumentation.js` exports Next's `register()` hook, which runs once when
+the server process starts — what this work always needed. The layout keeps its
+import; bootstrap.js is guarded by `global.__appBootstrapped`, so whichever path
+arrives first wins and the other is a no-op, and dev HMR behaves as before. The
+edge runtime returns immediately: no filesystem, no child processes, no business
+starting a MITM server.
+
+Verified on the same boot that failed before — launchd's exact PATH, and not one
+page loaded:
+
+    [InitApp] MITM was enabled, auto-starting...
+    [MITM] 🚀 Starting server... (router: http://localhost:20128)
+    [InitApp] MITM auto-started
+    [InitApp] DNS restored from saved state
+
+Port 443 came up immediately, DNS was restored for all three enabled tools, and
+a plain curl to api.anthropic.com was captured and answered.
+
+A note on how this was missed: the v0.5.185 boot test passed against a build run
+by hand, and a leftover instance of that build kept holding port 20128
+afterwards — so the follow-up check that was supposed to confirm the published
+package was talking to the hand-built one instead. A test now fails if
+`app/layout.js` ever becomes the only importer of the bootstrap again.
+
+# v0.5.186 (2026-11-13) — the build stops phoning Google for fonts
+
+Carries everything in v0.5.185, which npm accepted and then left staged: the
+registry has not served it, so `npm install` cannot reach it. Cut again here with
+the font fix on top.
+
+**`next/font/google` resolved its CSS during `next build`,** so a production build
+only succeeded while fonts.googleapis.com answered the machine doing the
+building. It did not, twice in one day — the first v0.5.183 npm publish and the
+v0.5.185 Docker image — both dying as:
+
+    src/app/layout.js
+    An error occurred in `next/font`.
+    TypeError: Cannot read properties of null (reading '1')
+        at .../@next/font/dist/google/loader.js:122:78
+
+Both recovered on a blind re-run, which is the worst shape a release step can
+have: it fails for a reason nothing in the diff explains, and retrying looks like
+a fix. Inter and Space Grotesk are now committed as latin-subset variable woff2
+and read with `next/font/local`. Verified by building with both Google font hosts
+blocked at the socket layer — exit 0, compiled successfully.
+
+Nothing changes for visitors. `next/font/google` already self-hosted these files,
+and the two the build emits are byte-identical to the ones v0.5.184 shipped —
+same sha256, same content-hashed name:
+
+    36966cca54120369-s.p.woff2   shipped=a0d054c4af55  new=a0d054c4af55
+    e4af272ccee01ff0-s.p.woff2   shipped=c940764593d0  new=c940764593d0
+
+It also drops 204 KB of fonts nothing renders. The google loader pulled every
+unicode-range subset — latin-ext, cyrillic, greek, vietnamese — for a latin-only
+UI: 10 woff2 totalling 276 KB, against 2 totalling 72 KB now.
+
+One subtlety is pinned by a test rather than left to luck. `--font-sans` names the
+literal `'Inter'`, not `var(--font-inter)`. `next/font/local` names the family
+after the binding it is assigned to, so `const inter` emits
+`@font-face{font-family:inter}`, and CSS matches family names ASCII
+case-insensitively — rename that one binding and the body silently falls to
+-apple-system with nothing erroring. (The old loader emitted the real `Inter`,
+confirmed in the shipped v0.5.184 CSS, so the rendered typeface is unchanged.)
+
+Both families are OFL-1.1, which permits redistributing the files; provenance,
+source URLs and axis ranges are in src/app/fonts/README.md.
+
+# v0.5.185 (2026-11-13) — MITM comes back after a reboot
+
+Three bugs, all silent. The first two stacked: MITM never auto-started after a
+restart, and the watchdog then stripped the DNS redirects it could no longer
+serve, so capture was simply off until someone opened the dashboard.
+
+**The saved sudo password could not be read under launchd.** `node-machine-id`
+shells out to `ioreg`, which lives in /usr/sbin, and the LaunchAgent's PATH was
+`<node>/bin:/usr/local/bin:/usr/bin:/bin`. Measured on a real machine:
+
+    $ env -i PATH=<the plist's PATH> node -e 'machineIdSync()'
+    /bin/sh: ioreg: command not found
+
+So the call threw, the key derivation silently fell back to hashing the salt
+alone — a different key — AES-GCM rejected the auth tag, and the password read
+as absent. The whole failure surfaced as `MITM was enabled but no saved password
+found, skipping auto-start`, which is the wrong sentence: the password was on
+disk and decrypted fine by hand.
+
+The key now comes from the machine id this app already persists to
+`DATA_DIR/machine-id`, the file shared/utils/machineId.js keeps for exactly this
+reason ("guarantees CLI/server/middleware see same value even when machineIdSync
+fails"). Reading a file needs no PATH. Decryption tries every historical key, so
+a password saved under the old derivation still opens and nobody re-enters
+anything. The candidates are memoized: that call ran per decrypt attempt and
+printed `ioreg: command not found` 162 times in a single boot.
+
+**A stale start lock blocked every later start, permanently.** The lock is
+written with O_EXCL and removed on every clean path — but not by a SIGKILL, and
+`launchctl kickstart -k` is a SIGKILL. The leftover file named a pid that had
+been dead for six minutes and the throw was unconditional, so after one unclean
+shutdown MITM could never start again until someone deleted the file by hand:
+
+    [InitApp] MITM was enabled, auto-starting...
+    [InitApp] MITM auto-start failed: MITM server is already starting (lock contention)
+
+A lock whose holder is gone is now reclaimed, with a two-minute age backstop for
+a recycled pid number.
+
+`/usr/sbin:/sbin` are added to the LaunchAgent PATH as well. manager.js no longer
+needs ioreg, but the next caller reaching for an sbin tool should not have to
+rediscover that a LaunchAgent only gets the PATH written into the plist.
+
+The one unhelpful log line now distinguishes its four causes. That silence is why
+this survived.
+
+**lastUsed stayed a bare date for the first hours of each local day.** Found
+because the test run crossed midnight and three existing tests went red on an
+unchanged checkout. The daily rollup stores `lastUsed` as a LOCAL day key and the
+overlay refines it from a UTC timestamp; `new Date("2026-11-13")` parses as UTC
+midnight, so at UTC+6 every entry recorded between 00:00 and 06:00 local compared
+as older than its own day key and was never refined. One comparison helper now
+covers all four buckets, and byTool is refined with them instead of being the one
+row on the page still showing a date.
+
+Verified by booting with `env -i PATH=<the exact plist PATH>` and a stale lock
+left in place: port 443 came up with no intervention and no sudo prompt, DNS was
+restored from saved state, and a plain curl to api.anthropic.com was captured and
+answered. Reverting the key derivation fails three of the new tests, including
+two different keys for the two PATHs.
+
+# v0.5.184 (2026-11-12) — usage can finally tell you which IDE spent the money
+
+There is no 0.5.183 on npm. Its publish was accepted, signed and logged, and
+then sat in npm staging without ever being served: the registry 404s the
+version, `npm install` reports ETARGET, and a retry gets `409 Cannot publish
+over previously staged version`. The version number is unusable, so the same
+changes ship here. The tag, Docker image and GitHub release for v0.5.183 exist
+and are the same code.
+
+Two accounting bugs. Both were silent, and both made the usage page actively
+misleading rather than merely incomplete.
+
+**Captured requests were filed under whoever served them.** The MITM rewrites the
+model on the way through — an Antigravity `gemini-*` turn leaves as whatever
+alias serves it — so by the time the router recorded usage, the only thing left
+to attribute by was the serving provider. Measured on a live install: Kiro and
+Antigravity were being captured and answered on every turn, while usage read
+"kiro: 1 request, 18h ago". Nothing was lost; it was all booked under `claude`.
+Anyone checking usage to answer "is my Kiro traffic being captured?" would have
+concluded it was not.
+
+The tool was known at interception time and thrown away. It now travels one hop
+to the router in `x-krouter-mitm-tool`, derived from the host that already chose
+the handler so there is no second source of truth to drift from. The router
+validates it against the known tool list — the header arrives on an ordinary
+client request, so anything that can reach `/v1/*` can set it, and the worst a
+forged value can now do is mislabel its own request as one of five real tools.
+It lands in `meta`, a column that had been written as a literal `{}` on every row
+since it was added, so existing databases need no migration: an older row reads
+back with no tool, which is the truth about it.
+
+`byTool` is keyed `tool|model|provider`, like `byEndpoint`, so a tool breaks down
+by the model that actually served it — the interesting part, given the model is
+what got rewritten. It is deliberately not a partition of the day: only captured
+requests have a tool. An empty table there beside a busy `byModel` now means
+"capture is off", a distinction the old stats could not express. Exposed for
+every period, as a `tool` field on history rows, and as a new "Usage by Captured
+Tool" view on the usage page. Both aggregation paths report it — the raw-row scan
+that serves `today`/`24h` was not selecting `meta` at all, so without that fix
+the dashboard's default period would have shown no tools while the longer-period
+rollup showed them correctly.
+
+**Every streaming request was counted twice.** Found while tracing where usage
+gets written. `finalizeStream` recorded through `logUsage` and again through
+`onStreamComplete -> saveUsageStats`: two `usageHistory` rows with identical
+tokens milliseconds apart, two increments of the daily rollup and of
+`totalRequestsLifetime`, double the cost. The tell in the table is the pair of
+rows where one has an endpoint and one does not. So `totalRequests` and spend
+have been roughly 2x for streaming traffic. `logUsage` no longer writes when a
+recorder already owns the turn, and keeps the write when nothing else records, so
+a stream nobody tracks is still counted once rather than zero times.
+
+Measured before and after on a real provider through the dev server: the same
+streaming request wrote two rows with `meta={}`, then one row with
+`meta={"tool":"kiro"}`. `byTool` agrees across both aggregation paths, and a
+forged `x-krouter-mitm-tool: evil-corp` was dropped while the request still
+served normally. Both MITM entrypoints were rebuilt and confirmed to carry the
+new header, so DNS capture and proxy capture label traffic identically.
+
+Not verified on screen: `/dashboard` requires a login, so the new table is
+covered by lint, the production build and the API data behind it rather than by
+eyes.
+
+# v0.5.182 (2026-11-12) — the dashboard stops shipping a 3.9 MB font, and dialogs become dialogs
+
+Mostly the dashboard, measured against the design canvas rather than by eye. Four of
+these are bugs rather than taste, and three of them were invisible because nothing
+errored.
+
+## Fixed
+
+- **45 class names referenced colour tokens that do not exist.** `text-text-primary`
+  (29 uses), `bg-bg-subtle`, `bg-surface-hover`, `bg-bg-tertiary` and six more. Tailwind
+  emits no rule for an unknown token, so nothing errored and nothing painted: a "hover"
+  row that never changed, a "subtle" well with no well. They survived because an element
+  with no colour of its own inherits, and wherever the parent happened to be right it
+  looked correct. A test now scans the app's own token namespaces and fails on any name
+  `globals.css` does not define.
+
+- **Four pages had no title in the top bar** — PXPIPE, Presidio, Environment and Chat.
+  The title map is a chain of `pathname.includes(...)` ending in `{ title: "" }`, so a
+  route nobody added lands silently on the empty case. The new test walks the routes that
+  actually exist instead of trusting the chain to be complete; nothing throws when a page
+  simply has no header.
+
+- **Dialogs were not dialogs.** 47 of them go through the shared component and another
+  10 built their own overlay; none had `role="dialog"`, so a screen reader read the
+  content as more of the page it was covering. Focus never entered, so the first Tab
+  after opening went to something behind the overlay, and Tab then walked straight out.
+  Nothing brought focus back on close. The shared header also drew macOS traffic lights,
+  where two of the three circles were `cursor-not-allowed` decoration — window chrome on
+  something that is not a window, and controls drawn on things that do nothing.
+
+  The focus restore is the subtle part. The opener cannot be read from an effect: React
+  applies `autoFocus` while committing the panel, so by the time any effect runs — layout
+  or passive — `document.activeElement` is already a control inside the dialog, and the
+  dialog "restores" focus to the element it is about to destroy. It is captured during
+  the render that opens it.
+
+- **The active nav row tinted its own label out of legibility.** `text-primary` on
+  `bg-primary/10` made the current page the least readable label in the nav. The icon
+  carries the state; the label stays at full text weight.
+
+## Changed
+
+- **The icon webfont is gone.** 553 spans across 101 files rendered their icon as a word
+  and let `material-symbols-outlined.woff2` turn it into a glyph — a 3,870 KB download on
+  a dashboard whose whole pitch is that it runs on your machine. They are now 182 drawn
+  SVG icons, 28.7 KB of source. The published package drops from 13.9 MB to 10.2 MB. The
+  `opacity: 0` rule that hid every icon until the font arrived goes with it.
+
+- **Dark surfaces ran backwards.** The sidebar was `rgba(38,38,38,.72)`, which composites
+  to roughly `#222` over the canvas — lighter than the page it borders — so the nav
+  floated above a darker page and cards had almost nothing separating them from a
+  neighbour of the same value. The order now runs sidebar `#151514` < canvas `#1a1a1a` <
+  card `#212121`.
+
+- **One treatment for tables and headings.** Eight tables were written by hand with eight
+  different paddings; card headings were written twenty different ways. Both move to a
+  single rule, and numeric columns are tabular — a right-aligned proportional figure
+  still jitters row to row.
+
+- **The endpoint page says whether anything is routing through it**, and hands you the
+  command to point a client at it. The snippets are built from the variables the app
+  actually writes, and read `requireApiKey`, so when no key is required they say so
+  instead of printing a token line that does nothing. Kiro, Antigravity and Claude
+  Desktop are deliberately absent: they do not take a base URL, they are intercepted.
+
+## Security
+
+- **The router API key was on the command line.** The MITM server was spawned as
+  `sudo -S -E sh -c "... ROUTER_API_KEY='sk-...' ..."`, readable by every local process
+  through `ps`. The whole environment now goes down stdin behind a sentinel. The same fix
+  restores `MITM_FILE_LOG`, which never reached the child on macOS because the sudo
+  branch built a fixed variable list while the other branches spread `process.env`.
+
+# v0.5.176 (2026-11-11) — kRouter told you its own server was a stranger
+
+**Upgrade if you ever run `npm install -g` while kRouter is running.** After an upgrade
+the CLI could refuse to start, naming its own server as a foreign process.
+
+## Fixed
+
+- **"Port 20128 is held by next-server (pid NNNNN) — not kRouter."** Printed with
+  kRouter, and nothing else, on that port. `isOwnServerPid()` identifies the holder by
+  comparing its working directory against the package's `app` directory. npm upgrades by
+  staging into `.krouter-XXXX` and renaming that into place, so a server still running
+  across `npm install -g` holds a cwd whose path no longer exists under that name.
+  Measured on the upgrade that produced the report:
+
+  ```
+  holder cwd    : .../@sifxprime/.krouter-rqcc3q2I/app   (directory since deleted)
+  standaloneDir : .../@sifxprime/krouter/app
+  ```
+
+  The comparison can never succeed again, so the running server is classed as foreign,
+  the CLI exits rather than take the port, and the user is left with a stale version
+  serving and no way to start the new one short of finding the pid themselves. The
+  auto-updater renames the same directory, so it is not only npm that triggers it.
+
+  The holder is now identified by asking the port: `/api/version` is unauthenticated and
+  names the package, so one request settles it wherever the binary has moved to. The
+  refusal itself is unchanged -- kRouter still will not kill a port that is genuinely
+  someone else's; the fix widens what counts as its own, it does not widen what it kills.
+
+  The probe is launched with `execFileSync` and an argument array rather than through a
+  shell. That detail is load-bearing and is pinned by a test: a shell requires
+  JSON-escaping the script, which turns every newline into the two characters `\n`, and
+  node then fails to parse it. The surrounding `catch` swallows that, the function
+  returns false, and the original bug is restored with no symptom at all. It passes every
+  static check and fails only against a live port.
+
+# v0.5.175 (2026-11-11) — Proxy capture mode: interception without sudo, and without a black hole
+
+**New capture transport.** The DNS mode stays; this adds a second way to route an IDE
+through kRouter that needs no password and cannot take a domain down with it.
+
+## Added
+
+- **Proxy capture mode.** kRouter can now intercept over HTTP CONNECT on port 20129
+  instead of (or alongside) the /etc/hosts + :443 transport. Point a client at it with
+  `HTTPS_PROXY=http://127.0.0.1:20129` (plus the usual root-CA trust) and only that
+  client is affected:
+
+  | | DNS spoof | Proxy capture |
+  |---|---|---|
+  | sudo | every toggle | never |
+  | scope | whole machine | one app |
+  | kRouter down | domain blackholed machine-wide | one refused connection |
+  | state left behind | hosts entries to heal | none |
+  | hosts covered | hardcoded list | any CONNECT target |
+
+  Hosts it does not intercept are blind-tunnelled untouched, so pointing a whole app at
+  it cannot break the rest of that app's traffic. Start/stop from the dashboard card or
+  `PATCH /api/cli-tools/antigravity-mitm {"action":"proxy-start"|"proxy-stop"}` -- no
+  sudoPassword, deliberately.
+
+  Verified live, not just in tests:
+  - the real Claude CLI (`HTTPS_PROXY=... claude -p ... --model claude-opus-5`) answered
+    through it; the log shows 15 non-chat calls passed through untouched and exactly one
+    intercepted and mapped;
+  - the Claude Desktop app itself, relaunched with the variable: its own traffic
+    (`claude_cli/bootstrap?entrypoint=claude-desktop`, `/api/artifacts/mcp`,
+    `/api/directory/plugins`) with chats intercepted and telemetry/OAuth untouched;
+  - a real Kiro 1.4.154 request shape replayed through it was intercepted and answered on
+    a deliberately invalid bearer token, so it never reached AWS. The Kiro CLIENT side is
+    not yet verified (it was running and was not restarted for this), so Kiro's card does
+    not list "proxy" yet. Copilot was unverifiable here (no VS Code installed).
+  - Antigravity cannot use this mode either: its agent reads no proxy variable at all, on
+    top of pinning its CA pool. The card already says so.
+
+  Each tool card now carries `captureModes` stating which transports are actually
+  verified for it, and the intercept log line carries the request path -- Claude Desktop
+  fans out ~100 near-simultaneous calls on launch (one per conversation), and without the
+  path a benign count_tokens fan-out is indistinguishable from a retry storm.
+
+  The routing decision moved to `src/mitm/dispatch.js`, shared by both transports and
+  testable for the first time (server.js opens a TLS listener on require); per-host TLS
+  contexts to `src/mitm/certContext.js`; hosts-file-bypassing DNS to
+  `src/mitm/resolveUpstream.js`, so the two modes cannot loop into each other.
+
+## Fixed
+
+- **Four lifecycle bugs found by running the proxy before shipping it**, three of them
+  the 0.5.171 shape (a status that lies): status trusted the child-process handle
+  instead of the port; the readiness loop had no delay so start() returned before the
+  bind; stop checked the port immediately after an asynchronous kill(); and the child
+  held piped stdio, so after its parent exited the next log write hit a dead pipe,
+  leaving a proxy that accepts connections and answers nothing. It is now spawned
+  detached, logging to `~/.krouter/mitm/proxy.log`.
+
+- **proxy.js is a build entrypoint.** `cleanPlainFiles` deletes every file in the CLI
+  bundle dir that is not one, so without this the entire feature would have been removed
+  from the published package while source, tests and lint all passed. A test pins it.
+
+# v0.5.174 (2026-11-11) — Claude Desktop gzips its bodies, so every request was passed through
+
+**Upgrade if you route Claude Desktop or Claude Code through MITM.** Interception looked
+on and was not; your own Anthropic quota was paying for it.
+
+## Fixed
+
+- **33 of 34 Claude Desktop requests left the machine on the vendor's quota.** Everything
+  you would check was correct, which is why this survived two releases: the `claude` DNS
+  toggle on, `/etc/hosts` pointing `api.anthropic.com` at `127.0.0.1`, the TLS handshake
+  served by `9Router MITM Root CA`, the MITM listening on `:443`. The requests arrived and
+  were forwarded straight back out. From the MITM's own dumps on a live install:
+
+  ```
+  /v1/messages raw dumps        34
+  of those, passthrough         33
+  content-encoding              gzip   (5 of 5 sampled)
+  body as the MITM read it      \x1f\x8b...  (binary)
+  model as the MITM read it     (not found)
+  user-agent                    claude-cli/2.1.321 (external, claude-desktop, ...)
+  ```
+
+  Claude Desktop and Claude Code send `/v1/messages` gzip-compressed. `extractModel()` read
+  the raw bytes, `isBinaryData()` counted >30% non-printable bytes in the gzip header and
+  bailed, the model came back `null`, `getMappedModel()` had nothing to map, and
+  `if (!mappedModel) return passthrough(...)` sent the request to Anthropic.
+  `handlers/claude.js` would have failed on the same body a line later.
+
+  Kiro was unaffected throughout — plain JSON, no `content-encoding` — which is why this
+  read as a Claude-only certificate or toggle problem rather than a body-reading one.
+
+  The body is now decoded once before dispatch (gzip, x-gzip, deflate including raw,
+  br, zstd, and stacked encodings undone right-to-left), and the decoded buffer goes to
+  both `extractModel` and the handler. `passthrough` still sends the original bytes,
+  because it forwards the client's own headers and those still say gzip. The decoder is
+  deliberately forgiving: an unknown encoding or a failed inflate returns the body
+  untouched, so the existing passthrough path applies and no request is ever failed by
+  this layer. `content-encoding` joins `STRIP_HEADERS`, since `fetchRouter` re-serializes
+  with `JSON.stringify` and forwarding the header would tell kRouter to gunzip plain JSON.
+
+  It lives in `src/mitm/bodyCodec.js` for the reason `getMappedModel` moved to
+  `modelMap.js` in 0.5.169: `server.js` opens a TLS listener on require, so logic left
+  inside it can only be tested by re-implementing it, and a re-implementation drifts.
+
+- **The CLI Tools card now says Antigravity 2.x chat cannot be intercepted.** The toggle
+  used to look like every other one and then silently do nothing. Antigravity's chat is
+  made by `~/.gemini/bin/agy`, a 200 MB Go binary built with boringcrypto that carries its
+  own certificate pool and reads no proxy or CA environment variable
+  (`HTTPS_PROXY`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `GODEBUG`: zero occurrences).
+  No DNS redirect, proxy, or transparent-decrypt scheme changes that. Use the `ag/`
+  provider instead, which reaches the same Google backend over OAuth.
+
+# v0.5.173 (2026-11-11) — Kiro moved its endpoint again, and a watchdog that deleted the redirects it was meant to protect
+
+**Upgrade if you use MITM at all.** One of these was billing your IDE vendor instead of
+your providers; the other was quietly switching MITM off underneath you every minute.
+
+## Fixed
+
+- **Kiro IDE 1.4.x chat was never intercepted, and its own credits were spent.** Captured
+  from a real client with MITM file logging:
+
+  ```
+  user-agent: KiroIDE 1.4.154
+  POST /v1/responses
+  {"model":"auto","input":[...42...],"tools":[...25...],"stream":true,
+   "origin":"AI_EDITOR","profileArn":"...","metadata":{"kiro:agent_mode":"vibe",...}}
+  ```
+
+  Kiro moved its chat endpoint to `/v1/responses` with an OpenAI Responses body.
+  `URL_PATTERNS.kiro` listed only `/generateAssistantResponse`, and the header fallback
+  only matches `x-amz-target`, which this request does not send — so `isChatRequest`
+  returned false and every turn went to passthrough. MITM showed as enabled, kRouter
+  recorded no request at all, and the IDE's own quota paid for it. The dump file was
+  written as `passthrough`, which is exactly what the user saw: Kiro credits consumed,
+  kRouter usage zero.
+
+  This is the second time. `config.js` already carried the note for 1.0.228, which moved
+  from the path to `POST /` plus a header and broke it identically. A missed endpoint does
+  not error — it bills the vendor.
+
+  kRouter already serves `/v1/responses` natively, so the body is forwarded untouched with
+  only the model swapped, the same way `handlers/antigravity.js` forwards Gemini bodies.
+  Translating into CodeWhisperer and back would have dropped the 25 tool definitions and
+  the `kiro:*` metadata the IDE round-trips. `model: "auto"` is already an alias key, so
+  existing mappings keep working.
+
+- **The 0.5.171 watchdog deleted live DNS redirects every 60 seconds.** That release added
+  a repair for redirects left behind by a crashed MITM. The repair was right; the liveness
+  check feeding it was not.
+
+  `getMitmStatus` decided `running` from an in-process handle plus the PID file. Both are
+  blind to a MITM server that outlives the app that spawned it: restart the app and
+  `serverProcess` is null while the real server — spawned through sudo, owned by root — is
+  still listening. `lsof` as an ordinary user cannot see a root-owned listener either.
+
+  So the watchdog read "DNS present + not running" as the blackhole state and removed
+  working redirects. Observed on a real machine: antigravity and kiro confirmed
+  intercepting (TLS issuer `9Router MITM Root CA`) at 12:02; minutes later `/etc/hosts`
+  held no entries, both hosts resolved to the vendor again, and the IDEs were back on the
+  vendor's billing with the UI still showing MITM enabled. It also explains an Antigravity
+  capture that recorded zero requests — nothing was being redirected to us at all.
+
+  `getMitmStatus` now falls back to a TCP connect on the MITM port, which does not care who
+  owns the socket. Being wrong the other way is cheap: a redirect we could have cleaned
+  survives to the next tick. Deleting a working one is not.
+
+## Notes
+
+- Two new test files, 19 tests; the suite is 3,669.
+- Antigravity's agent still cannot be intercepted, now confirmed with the redirect
+  verifiably held for the whole capture: in the same window on the same host, `curl`
+  reached the MITM and produced dumps while the agent produced none and logged 38
+  `x509: certificate signed by unknown authority` errors. `agy` embeds its own root pool
+  (`NewCertPool`/`RootCAs`, 22 bundled PEM blocks) and reads no TLS, CA or proxy
+  environment variables; `antigravity.caCertificates` exists only in `@vscode/proxy-agent`,
+  the Electron side, which is why it fixes sign-in and never the agent. The `ag/` provider
+  itself works normally — this is the IDE-via-MITM path only.
+
+# v0.5.172 (2026-11-11) — a 200 that is a retirement notice is not an answer
+
+**Upgrade if you use combos, or any model a vendor has retired.** A provider answering
+"that model is gone, use this other one" was being billed, logged as a success, and shown
+to you as the model's own reply.
+
+## Fixed
+
+- **An HTTP 200 whose entire body is a vendor retirement notice counted as a completion.**
+  Measured live against `ag/claude-sonnet-4-6`, an id still in the catalogue:
+
+  ```
+  HTTP 200
+  {"object":"chat.completion","model":"gemini","choices":[{"message":{
+    "content":"Claude Sonnet 4.6 is no longer available. Please switch to Claude Sonnet 5.5."},
+    "finish_reason":"stop"}]}
+  ```
+
+  Nothing in the tree saw a problem: `finish_reason` is a clean `stop` and there *is*
+  text, so it was billed, written to the request log as `200 OK`, rendered to the user as
+  if the model had said it, and a combo did **not** advance to its next entry —
+  `isZeroContentResponse` rejects anything whose finish reason is not
+  `in_progress`/`incomplete`, and a notice is neither.
+
+  Detecting this risks the opposite error, which would be worse: a model legitimately
+  *answering* a question about a retired model says much the same words. So the gate is a
+  conjunction and every part must hold — no tool calls, a short message, it says the thing
+  is gone **and** names a replacement, and when the caller supplies the requested model the
+  text must name *that* model. A vendor notice always names the model you asked for; a user
+  asking about some other retired model does not match.
+
+  Verified end to end on a live account: a combo whose first entry returns the notice used
+  to return the notice, and now advances and answers from the next entry, filing the
+  attempt as `empty` instead of `success`.
+
+- **Zero-content 200s were filed as ordinary successes.** `EMPTY_COMPLETION_STATUS` exists
+  so these are "not filed alongside real 200s" — and was called from nowhere, so every
+  empty completion, and every retirement notice, went into the request log as `200 OK`.
+  That is what kept this invisible.
+
+- **A handler's two records disagreed about the same call.** `sseToJsonHandler` wrote its
+  request-log line *before* computing its diagnosis, so the log said `200 OK` while
+  `saveRequestDetail` correctly filed the same request as `empty`.
+
+## Notes
+
+- One new test file, 20 tests, pinning both directions — what must be caught and what must
+  be left alone. The suite is 3,650.
+- v0.5.171 was accepted by npm with a signed provenance statement but had not been served
+  by the registry at the time of writing. This release supersedes it and contains
+  everything it carried.
+
+# v0.5.171 (2026-11-11) — when MITM dies, it must not take the network with it
+
+**Upgrade if you use MITM.** A crash, force-quit or power cut left the DNS redirects
+behind with nothing listening, and every redirected provider host stopped working until
+you worked out why and restarted kRouter — on many machines, not even then.
+
+## Fixed
+
+- **MITM crashing took the providers offline, and the repair did not run.** The DNS
+  redirects are what make MITM work and what break the machine when the server is gone:
+  the host resolves to `127.0.0.1`, nothing is on `:443`, and the request does not fall
+  back to the real vendor — it fails to connect.
+
+  A clean stop already handles this (`server.js` shutdown calls
+  `removeAllDNSEntriesSync`, which can write `/etc/hosts` directly because the MITM
+  server runs as root). A SIGKILL, crash, force-quit or power cut does not. Reproduced
+  on a real machine:
+
+  ```
+  kill -9 <mitm pid>
+  :443 listener        0
+  hosts entries left   5
+  curl daily-cloudcode-pa.googleapis.com -> Couldn't connect to server
+  curl runtime.us-east-1.kiro.dev        -> Couldn't connect to server
+  ```
+
+  Two things made it stick. The repair ran **only at app startup**, so a crash meant no
+  provider traffic until the user restarted kRouter. And it called
+  `removeAllDNSEntries()` with **no argument**, so it needed a passwordless sudo and
+  silently did nothing on exactly the machines that get stuck — the user was then told to
+  run a `sed` command by hand.
+
+  The repair now runs on the 60-second watchdog tick as well as at startup, supplies the
+  sudo password already stored (the same one that started MITM), refuses to act while the
+  server is running, and verifies the removal by re-reading the status instead of trusting
+  the call.
+
+## Notes
+
+- Worth knowing: the MITM server is spawned with `detached: false`, so it is a child of
+  the kRouter app and stops when the app stops. That is why restarting kRouter drops MITM
+  until you turn it on again.
+- Verified on the wire this release: Claude Desktop through MITM returns
+  `claude-opus-5-5 -> claude-opus-5` (the id that leaked to Anthropic before 0.5.169), and
+  Kiro returns a 200 AWS EventStream via `auto -> ag/claude-opus-5-5-high`.
+- Antigravity's agent cannot be intercepted: `agy` embeds its own root pool
+  (`NewCertPool`/`RootCAs`, 22 bundled PEM blocks) and reads no TLS, CA or proxy
+  environment variables. `antigravity.caCertificates` exists only in `@vscode/proxy-agent`,
+  the Electron side, so it fixes sign-in and never the agent. Not fixable from kRouter.
+- One new test file, 8 tests; the suite is 3,630.
+
+# v0.5.170 (2026-11-11) — the Antigravity roster, and a test instance that could repoint the whole machine
+
+**Upgrade if you use Antigravity.** Every Gemini chat id kRouter published for it returned
+404, and the catalog was advertising models the account cannot serve while hiding ones it
+can. Both are fixed, and measured against a live account rather than against upstream
+commit messages.
+
+## Fixed
+
+- **Every Antigravity Gemini id returned 404.** Measured against a live
+  `v1internal:fetchAvailableModels` for a real account: of the 25 ag ids kRouter
+  advertised, **15 were not served**, and **12 served ids were advertised to nobody**.
+
+  Two halves were missing, which is why 0.5.166 believed it had already fixed this. The
+  3.8 entries carried no `upstreamModelId` at all, so `getModelUpstreamId` returned the id
+  unchanged; and `getModelThinkingLevel`, added in 0.5.166 for exactly this ladder, was
+  called from nowhere, so even a correct wire id would have dropped the tier. Antigravity
+  collapses each flash family to ONE tiered id and takes the tier in
+  `generationConfig.thinkingConfig`. Proven directly against Google:
+
+  ```
+  model=gemini-3.8-flash-tiered -> 200
+  model=gemini-3.8-flash-high   -> 404 NOT_FOUND
+  ```
+
+  The executor rebuilds the envelope from the catalog id, so it is what decides; it now
+  reads both helpers. Result on that account, across every published ag Gemini id:
+
+  ```
+  before   0 of 20 worked
+  after    9 work, 1 transient Google capacity 429, 10 correctly 404
+           (that account's experiment arm genuinely does not serve them)
+  ```
+
+- **Models Google serves that nobody could reach.** Added `gemini-2.5-flash`,
+  `-flash-lite`, `-flash-thinking`, `gemini-2.5-pro`, `gemini-3.1-flash-lite` and
+  `gemini-3.5-flash-lite`. `gemini-3-flash` had been dropped as "retired on 2026-10-08" on
+  the strength of an upstream commit; it is served at full quota and is that account's
+  `commandModelIds` entry, so it is published again.
+
+- **The quota bars for the real models never rendered.** `usage.js` kept a SECOND
+  hand-maintained list that had to agree with Google and did not: it carried
+  `gemini-3.8-flash-high`, which does not exist, while omitting ids that do. It is derived
+  from the ag catalog now, under both the published and the wire id, so a catalog edit
+  cannot silently lose a bar.
+
+- **A second instance could repoint the whole machine's CA trust.** Starting MITM writes
+  `NODE_EXTRA_CA_CERTS` for the login session and `antigravity.caCertificates` in the IDE's
+  settings — both absolute paths inside `DATA_DIR`. Run a build under test with
+  `DATA_DIR=/tmp/something` next to a working install, as you would to avoid touching it,
+  and every Electron app on the machine plus the Antigravity IDE is silently repointed at a
+  certificate under `/tmp`.
+
+  This happened while testing 0.5.169 on a real machine. Both settings were rewritten to a
+  scratch path, and Antigravity's Go agent then failed every request with
+
+  ```
+  tls: failed to verify certificate: x509: certificate signed by unknown authority
+  ```
+
+  The file was present and byte-identical — the sandboxed agent simply could not read that
+  path. It looked exactly like a CA-install bug, and the keychain was investigated at
+  length before the cause turned out to be the test instance. Both writes are now gated on
+  `IS_DEFAULT_DATA_DIR`, and a skipped write says so in the log rather than being silently
+  different.
+
+## Changed
+
+- The test that was meant to prevent the Gemini drift was asserting the bug: it pinned
+  `gemini-3.8-flash-high` as its own wire id, and its header claimed the tier was "read by
+  the Antigravity executor through `getModelThinkingLevel`" while nothing read it. It
+  checked the catalog's data against itself and never that anything consumed it, so it
+  passed throughout. Corrected against measurement, and a checked-in snapshot of the live
+  roster (`tests/fixtures/antigravity-live-roster.json`) now makes drift fail a test
+  instead of reaching users as a 404.
+
+## Notes
+
+- Three new test files since 0.5.169; the suite is 3,622.
+- The roster is server-side dynamic — it flips with `experimentIds`, and two captures of
+  the same account minutes apart differed — so the fixture is a snapshot of one arm, not a
+  contract.
+
+# v0.5.169 (2026-11-11) — four ways a request succeeded without doing what you asked
+
+**Upgrade if you use MITM, a Gemini-protocol client, a Codex-style client, or send images to
+Antigravity.** Every fix here is a case where kRouter returned a plausible answer while
+quietly not doing the thing: a Claude Desktop request intercepted and then forwarded to
+Anthropic on your own bill, an image dropped on the way to the model with a 200 and a
+confident reply, a 404 reported as "service unavailable, retry in 30 minutes", and a
+Responses-API client handed an envelope it cannot parse.
+
+Found by running this build as a second server on a spare port against a copy of a real
+install's database, so each one has a measured before and after against live paid providers
+rather than only a unit test.
+
+## Fixed
+
+- **Claude Desktop was intercepted and then forwarded to Anthropic anyway.** With MITM on, the
+  hosts entry in place and the CA trusted, a request for a current model id left the machine and
+  billed the user's own Anthropic account, while the dashboard still showed MITM as working.
+  Measured against a running install, `api.anthropic.com` redirected to kRouter:
+
+  ```
+  claude-opus-4-7   -> routed, served as cc/claude-opus-5
+  claude-opus-5-5   -> 401 "invalid x-api-key" FROM ANTHROPIC (request_id req_011CgvsLCqYZ...)
+  ```
+
+  `MODEL_PATTERNS` had a hand-ordered family ladder for `antigravity` and **no entry at all for
+  `claude`**, so any id outside the five slots a user could map fell past every lookup and
+  `getMappedModel` returned null — which on an intercepted vendor host means passthrough. Each
+  Claude family now has a ladder, newest alias first, and `getMappedModel` skips an entry whose
+  alias the user has not mapped. The upshot is that **no re-mapping is needed**: the five slots
+  already saved in 0.5.168 now cover Opus/Sonnet/Haiku/Fable 5.x and dated variants of them.
+
+- **The mapper preferred an accident to the ladder.** The prefix step is incidental string overlap;
+  `MODEL_PATTERNS` is ordered most-specific-first on purpose. Running the accident first made the
+  ladder unreachable for the ids it exists for: with `{claude-opus-5-5, claude-opus-5-5-low}` mapped,
+  `claude-opus-5-5-extra-low` returned the **bare** slot, because `claude-opus-5-5-low` is not a
+  prefix of it and so was never even a candidate. Specific patterns now run before the prefix step,
+  and family-wide catch-alls (tagged `fallback: true`) run after it, so a dated id like
+  `claude-opus-5-20261001` still wins its own slot instead of being swallowed by `/opus/i`.
+
+- **The same config gave two different answers depending on the order you clicked.** The prefix
+  step used `.find()` over `Object.keys()`, which is insertion order — and for this map that is the
+  order rows were saved in the UI. `claude-opus-5-5-20261122` over `{claude-opus-5, claude-opus-5-5}`
+  resolved to the Opus 5 target or the Opus 5.5 target purely by which was saved first. The longest
+  matching key now wins, with ties broken by name, so the result is reproducible. This starts to
+  matter in this release, which adds the colliding `claude-opus-5` / `claude-opus-5-5` pair.
+
+- **Antigravity sign-in broke when MITM came on.** Antigravity's language server is Go: it reads
+  neither the OS trust store nor `NODE_EXTRA_CA_CERTS`, so with DNS redirecting
+  `daily-cloudcode-pa.googleapis.com` to kRouter it rejected our certificate with
+  `x509: certificate signed by unknown authority` and dropped the user back to the login screen.
+  kRouter now writes `antigravity.caCertificates` itself when MITM starts. It is idempotent, keeps
+  the rest of the file, replaces a stale path from an earlier install, tolerates VS Code comments
+  and trailing commas, and leaves a `settings.json` it cannot parse untouched rather than risk it.
+
+- **Stopping MITM removed the trust that tools needed in order to start.** Teardown ran on MITM
+  stop, so any tool launched while MITM was off had no trust, and the next time MITM came up its
+  TLS failed until that tool was restarted — which is the "restart every IDE" dance. Trust now
+  persists; it is inert while MITM is off because nothing resolves to kRouter, and it is removed
+  only when the root CA is uninstalled.
+
+- **Claude Desktop's MITM slot list was three generations behind.** It offered Opus 4.7/4.6,
+  Sonnet 4.6/4.5 and Haiku 4.5 and nothing newer, so the models a current build actually sends
+  could not be mapped at all. Older ids are kept, because a saved mapping may point at one and
+  older builds in the field still send them.
+
+- **A Codex-style client got a `chat.completion` instead of a Responses envelope.** Every
+  provider branch in `translateNonStreamingResponse` ends by building an OpenAI completion,
+  and only the OpenAI-provider branch converted that to the Responses shape. So a client
+  speaking the Responses API got `{object:"chat.completion", choices:[…]}` with no `output[]`
+  from every other provider. Measured on a dev server against three live connections:
+
+  ```
+  POST /v1/responses {"stream":false}   cc/claude-opus-5           object=chat.completion
+                                        ag/claude-sonnet-5-5-high  object=chat.completion
+                                        kr/claude-sonnet-4.5       object=chat.completion
+  the same request {"stream":true}      all three                  9-10 response.* events
+  ```
+
+  Streaming was already right; only non-streaming leaked — the same shape of gap fixed for
+  Claude clients in 0.5.109, 0.5.117 and 0.5.146. Converted once at the end of the function
+  rather than per branch, so a provider added later cannot reopen it.
+
+- **Every Gemini-protocol client got a 404.** `/v1beta` had no rewrite. The route exists at
+  `/api/v1beta/models/[...path]` and serves real data; nothing routed the public path to it.
+  `dashboardGuard` had listed `/v1beta` in `PUBLIC_PREFIXES` from the start, which is what the
+  intent was, so the test meant to prevent this passed throughout — it only ever checked that
+  rewrites are guarded, never that a guarded prefix is routed. Both directions are asserted
+  now. The new prefix was verified to still demand an API key from a remote caller, since an
+  unguarded rewrite is exactly how `/codex` became exploitable.
+
+- **A model that returned 404 once then answered 503 "retry after 30m" for half an hour.**
+  When every account for a model is parked, 0.5.166 pinned the reply to 503 + `Retry-After`
+  so a stale 401 could not make Claude Code think the key was bad. Correct for a credential
+  or rate-limit status. Wrong for 404: the model id is simply not there, no wait changes
+  that, and the client was parked on something that would never resolve while an actionable
+  error ("pick another model") was replaced by an unactionable one. Reproduced against
+  `ag/gemini-3.8-flash-high`, an id kRouter's own `/v1/models` advertises:
+
+  ```
+  before   attempt 1  404 model_not_found    1.71s      after   404  0.63s
+           attempt 2  503 "reset after 30m"  0.04s              404  0.22s
+           attempt 3  503 "reset after 30m"  0.04s              404  0.04s
+  ```
+
+  The cooldown's fast skip is kept, and no `Retry-After` is sent for a status that waiting
+  cannot fix. The connection row held `errorCode: 404` and `modelLock_*` keys for nine
+  models, two of which serve fine, so healthy models reach this path too. `imageGeneration`,
+  `tts` and `videoGeneration` already reported the recorded code; `chat` and `embeddings`
+  hardcoded 503 and now agree with them.
+
+- **An image sent to a Claude model on Antigravity was silently dropped.**
+  `wrapInCloudCodeEnvelopeForClaude` converts Claude blocks to Gemini parts through an
+  explicit branch list — text, `tool_use`, `tool_result` — with no image branch, so the
+  bytes went nowhere. The request still returned **200** and the model answered as though
+  nothing had been attached: billed, logged as a success, and indistinguishable from a real
+  reply unless you knew what the picture contained. With a 96x96 solid-red PNG and "What
+  colour is this image?":
+
+  ```
+  cc/claude-opus-5           "Red"
+  kr/claude-sonnet-4.5       "Red"
+  ag/claude-sonnet-5-5-high  "I can't answer that because no image came through."   -> "Red"
+  ```
+
+  Fixed for image, document, audio and video blocks, base64 and url, over both the OpenAI
+  and the Anthropic protocol. Tool calling on the same path is unchanged.
+
+## Changed
+
+- `getMappedModel` moved out of `src/mitm/server.js` into `src/mitm/modelMap.js`. `server.js`
+  starts a TLS listener on require and therefore cannot be imported, so every previous test of
+  this logic re-implemented the function and could pass while the real one drifted. Tests now
+  drive the shipped function. The MITM bundle is esbuild-traced, so nothing needs listing.
+
+## Notes
+
+- The three mapping fixes take effect when the MITM server restarts and reloads its bundle.
+- Seven new test files, 97 new tests; the suite is 3,598.
+- Found by running the repo build as a second server on a spare port against a copy of a
+  real install's database, so every fix above has a before and an after against live paid
+  providers (Claude Code, Antigravity and Kiro) rather than only a unit test.
+
 # v0.5.168 (2026-11-02) — Haiku 5.5 thinking, images inside tool results, and the OpenCode Free session id that was a 1-in-100 lottery
 
 **Upgrade if you use Claude Haiku 5.5 with thinking, send images back from a tool, or run the
