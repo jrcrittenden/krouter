@@ -7,6 +7,7 @@ import openai from "./openai.js";
 import openrouter from "./openrouter.js";
 import gemini, { fetchGeminiVoices } from "./gemini.js";
 import venice from "./venice.js";
+import openaiCompatNode from "./openaiCompatNode.js";
 import { FORMAT_HANDLERS } from "./genericFormats.js";
 import { parseModelVoice } from "./_base.js";
 
@@ -23,6 +24,8 @@ const SPECIAL_ADAPTERS = {
 };
 
 export function getTtsAdapter(provider) {
+  // Custom OpenAI-compatible nodes: base URL comes from the connection.
+  if (typeof provider === "string" && provider.startsWith("openai-compatible-")) return openaiCompatNode;
   return SPECIAL_ADAPTERS[provider] || null;
 }
 

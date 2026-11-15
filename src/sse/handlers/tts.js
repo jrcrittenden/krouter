@@ -7,7 +7,7 @@ import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { AI_PROVIDERS, isOpenAICompatibleProvider } from "@/shared/constants/providers";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 
@@ -73,7 +73,8 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language) {
   log.info("ROUTING", `Provider: ${provider}, Voice: ${model}`);
 
   // noAuth providers — no credential needed
-  if (!CREDENTIALED_PROVIDERS.has(provider)) {
+  // Custom OpenAI-compatible nodes always go through their stored connection (base URL + key).
+  if (!CREDENTIALED_PROVIDERS.has(provider) && !isOpenAICompatibleProvider(provider)) {
     const result = await handleTtsCore({ provider, model, input: body.input, responseFormat, language, voice: body.voice, audioFormat: body.response_format, speed: body.speed });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");

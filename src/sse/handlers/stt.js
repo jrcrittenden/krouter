@@ -7,7 +7,7 @@ import { getModelInfo } from "../services/model.js";
 import { handleSttCore } from "open-sse/handlers/sttCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { AI_PROVIDERS, isOpenAICompatibleProvider } from "@/shared/constants/providers";
 import * as log from "../utils/logger.js";
 
 // Providers requiring credentials for STT
@@ -46,7 +46,8 @@ export async function handleStt(request) {
   log.info("ROUTING", `Provider: ${provider}, Model: ${model}`);
 
   // noAuth providers
-  if (!CREDENTIALED_PROVIDERS.has(provider)) {
+  // Custom OpenAI-compatible nodes always go through their stored connection (base URL + key).
+  if (!CREDENTIALED_PROVIDERS.has(provider) && !isOpenAICompatibleProvider(provider)) {
     const result = await handleSttCore({ provider, model, formData });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
