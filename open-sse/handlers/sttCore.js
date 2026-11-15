@@ -170,6 +170,16 @@ function jsonResponse(obj) {
   };
 }
 
+// Custom OpenAI-compatible nodes: {baseUrl}/audio/transcriptions, key optional
+// (self-hosted gateways often run without one).
+function nodeSttConfig(provider, credentials) {
+  if (typeof provider !== "string" || !provider.startsWith("openai-compatible-")) return null;
+  const raw = credentials?.providerSpecificData?.baseUrl;
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  const authType = credentials?.apiKey || credentials?.accessToken ? "apikey" : "none";
+  return { baseUrl: `${raw.trim().replace(/\/+$/, "")}/audio/transcriptions`, format: "openai", authType, authHeader: "bearer" };
+}
+
 /**
  * STT core handler — dispatch by sttConfig.format.
  * @returns {Promise<{success, response, status?, error?}>}
@@ -178,7 +188,7 @@ export async function handleSttCore({ provider, model, formData, credentials }) 
   const file = formData.get("file");
   if (!file) return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");
 
-  const cfg = AI_PROVIDERS[provider]?.sttConfig;
+  const cfg = AI_PROVIDERS[provider]?.sttConfig || nodeSttConfig(provider, credentials);
   if (!cfg) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${provider}' does not support STT`);
 
   const token = cfg.authType === "none" ? null : (credentials?.apiKey || credentials?.accessToken);
