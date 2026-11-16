@@ -2,7 +2,7 @@ import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
-import { getSettings, getCustomModels } from "@/lib/localDb";
+import { getSettings, getCustomModels, getModelAliases } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -20,13 +20,23 @@ const CREDENTIALED_PROVIDERS = new Set(
 
 // Model ids registered on a custom OpenAI-compatible node. Lets the node adapter tell a
 // namespaced id ("Qwen/Qwen3-TTS-...") from a "model/voice" suffix.
-async function getNodeKnownModels(provider) {
+// The compatible-node dashboard registers models as aliases ("<alias>" → "<nodeId>/<modelId>");
+// the media-provider pages use the custom-model registry. Read both.
+export async function getNodeKnownModels(provider) {
+  const known = new Set();
+  const prefix = `${provider}/`;
   try {
-    const all = await getCustomModels();
-    return new Set(all.filter((m) => m?.providerAlias === provider && typeof m.id === "string").map((m) => m.id));
-  } catch {
-    return undefined;
-  }
+    const aliases = await getModelAliases();
+    for (const target of Object.values(aliases || {})) {
+      if (typeof target === "string" && target.startsWith(prefix) && target.length > prefix.length) known.add(target.slice(prefix.length));
+    }
+  } catch { /* registry unavailable — fall through */ }
+  try {
+    for (const m of await getCustomModels()) {
+      if (m?.providerAlias === provider && typeof m.id === "string") known.add(m.id);
+    }
+  } catch { /* registry unavailable — fall through */ }
+  return known;
 }
 
 export async function handleTts(request) {
