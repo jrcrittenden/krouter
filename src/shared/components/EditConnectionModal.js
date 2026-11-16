@@ -33,6 +33,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
   const [saving, setSaving] = useState(false);
+  // Keyless gateways: lets an OpenAI-compatible node drop its stored key.
+  const [clearApiKey, setClearApiKey] = useState(false);
 
   useEffect(() => {
     if (connection) {
@@ -41,6 +43,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
         priority: connection.priority || 1,
         apiKey: "",
       });
+      setClearApiKey(false);
       // Load Azure-specific data if present
       if (connection.provider === "azure" && connection.providerSpecificData) {
         setAzureData({
@@ -82,6 +85,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
     ? (isOpenAICompatibleProvider(connection.provider) || isAnthropicCompatibleProvider(connection.provider))
     : false;
   const providerRegions = connection ? (AI_PROVIDERS?.[connection.provider]?.regions || null) : null;
+  const canClearApiKey = !isOAuth && !!connection && isOpenAICompatibleProvider(connection.provider);
 
   const handleTest = async () => {
     if (!connection?.provider) return;
@@ -161,6 +165,8 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
           updates.lastError = null;
           updates.lastErrorAt = null;
         }
+      } else if (canClearApiKey && clearApiKey) {
+        updates.clearApiKey = true;
       }
       
       // Add Azure-specific data if this is an Azure connection
@@ -234,7 +240,7 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
                 label="API Key"
                 type="password"
                 value={formData.apiKey}
-                onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
+                onChange={(e) => { setFormData({ ...formData, apiKey: e.target.value }); if (e.target.value) setClearApiKey(false); }}
                 placeholder="Enter new API key"
                 hint="Leave blank to keep the current API key."
                 className="flex-1"
@@ -245,6 +251,17 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
                 </Button>
               </div>
             </div>
+            {canClearApiKey && (
+              <label className="flex items-center gap-2 text-xs text-text-muted">
+                <input
+                  type="checkbox"
+                  checked={clearApiKey}
+                  disabled={!!formData.apiKey}
+                  onChange={(e) => setClearApiKey(e.target.checked)}
+                />
+                Remove the stored API key (gateway needs no key)
+              </label>
+            )}
             {validationResult && (
               <Badge variant={validationResult === "success" ? "success" : "error"}>
                 {validationResult === "success" ? "Valid" : "Invalid"}

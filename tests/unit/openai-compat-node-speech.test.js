@@ -18,8 +18,38 @@ describe("OpenAI-compatible node: TTS", () => {
 
   it("splits model/voice and passes bare ids through", () => {
     expect(splitModelVoice("qwen3-tts", "Vivian")).toEqual({ model: "qwen3-tts", voice: "Vivian" });
-    expect(splitModelVoice("qwen3-tts/Ryan", "Vivian")).toEqual({ model: "qwen3-tts", voice: "Ryan" });
+    expect(splitModelVoice("qwen3-tts/Ryan")).toEqual({ model: "qwen3-tts", voice: "Ryan" });
     expect(splitModelVoice("chatterbox-turbo")).toEqual({ model: "chatterbox-turbo", voice: undefined });
+  });
+
+  it("keeps namespaced model ids intact when the body names a voice", () => {
+    const id = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+    expect(splitModelVoice(id, "Vivian")).toEqual({ model: id, voice: "Vivian" });
+  });
+
+  it("keeps a registered namespaced model id intact without a body voice", () => {
+    const id = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+    expect(splitModelVoice(id, undefined, new Set([id]))).toEqual({ model: id, voice: undefined });
+    // A voice suffix on a registered namespaced id still splits off.
+    expect(splitModelVoice(`${id}/Ryan`, undefined, new Set([id]))).toEqual({ model: id, voice: "Ryan" });
+  });
+
+  it("sends a namespaced id upstream untouched with the body voice", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { headers: { "Content-Type": "audio/wav" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const id = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+    await handleTtsCore({ provider: NODE, model: id, input: "hi", credentials: creds(), voice: "Vivian" });
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ model: id, voice: "Vivian" });
+  });
+
+  it("uses known models passed through handleTtsCore", async () => {
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([1]), { headers: { "Content-Type": "audio/wav" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const id = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice";
+    await handleTtsCore({ provider: NODE, model: id, input: "hi", credentials: creds(), knownModels: new Set([id]) });
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.model).toBe(id);
+    expect(sent.voice).toBeUndefined();
   });
 
   it("posts to {baseUrl}/audio/speech with the model untouched and no auth when keyless", async () => {
