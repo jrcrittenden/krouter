@@ -2,7 +2,8 @@
 //
 // Unlike the openai adapter, the model id is passed through untouched: a self-hosted
 // gateway's TTS models (qwen3-tts, chatterbox-turbo, ...) are not OpenAI's, so treating an
-// unknown id as a voice name would be wrong. "model/voice" still selects a voice.
+// unknown id as a voice name would be wrong. "model/voice" still selects a voice unless the
+// id is a registered model or the body names a voice (see splitModelVoice).
 // The API key is optional; tailnet and LAN gateways often run without one.
 import { Buffer } from "node:buffer";
 
@@ -15,11 +16,22 @@ export function nodeBaseUrl(credentials) {
   return raw.trim().replace(/\/+$/, "");
 }
 
-/** "model/voice" → { model, voice }; otherwise the model as-is and the body voice. */
-export function splitModelVoice(model, bodyVoice) {
-  const slash = typeof model === "string" ? model.lastIndexOf("/") : -1;
+/**
+ * Resolve the upstream model id and voice.
+ *
+ * Gateway model ids may be namespaced ("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"), so a slash
+ * is only read as a "model/voice" suffix when nothing else disambiguates:
+ *   1. the full id is one of the node's registered models → pass it through untouched;
+ *   2. the request carries a body voice → pass the id through untouched and use that voice;
+ *   3. otherwise the text after the last slash is the voice.
+ */
+export function splitModelVoice(model, bodyVoice, knownModels) {
+  const voice = bodyVoice || undefined;
+  if (typeof model !== "string") return { model, voice };
+  if (voice || knownModels?.has?.(model)) return { model, voice };
+  const slash = model.lastIndexOf("/");
   if (slash > 0 && slash < model.length - 1) return { model: model.slice(0, slash), voice: model.slice(slash + 1) };
-  return { model, voice: bodyVoice || undefined };
+  return { model, voice: undefined };
 }
 
 export default {
@@ -27,7 +39,7 @@ export default {
     const base = nodeBaseUrl(credentials);
     if (!base) throw new Error("This provider has no base URL configured");
 
-    const { model: ttsModel, voice } = splitModelVoice(model, options.voice);
+    const { model: ttsModel, voice } = splitModelVoice(model, options.voice, options.knownModels);
     const body = { model: ttsModel, input: text };
     if (voice) body.voice = voice;
     if (FORMATS.has(options.audioFormat)) body.response_format = options.audioFormat;

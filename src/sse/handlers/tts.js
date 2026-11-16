@@ -2,7 +2,7 @@ import {
   extractApiKey, isValidApiKey,
   getProviderCredentials, markAccountUnavailable,
 } from "../services/auth.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getCustomModels } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleTtsCore } from "open-sse/handlers/ttsCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
@@ -17,6 +17,17 @@ const CREDENTIALED_PROVIDERS = new Set(
     .filter(([, p]) => p.serviceKinds?.includes("tts") && !p.noAuth && p.ttsConfig?.authType !== "none")
     .map(([id]) => id)
 );
+
+// Model ids registered on a custom OpenAI-compatible node. Lets the node adapter tell a
+// namespaced id ("Qwen/Qwen3-TTS-...") from a "model/voice" suffix.
+async function getNodeKnownModels(provider) {
+  try {
+    const all = await getCustomModels();
+    return new Set(all.filter((m) => m?.providerAlias === provider && typeof m.id === "string").map((m) => m.id));
+  } catch {
+    return undefined;
+  }
+}
 
 export async function handleTts(request) {
   let body;
@@ -80,6 +91,8 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language) {
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");
   }
 
+  const knownModels = isOpenAICompatibleProvider(provider) ? await getNodeKnownModels(provider) : undefined;
+
   // Credentialed providers — fallback loop (same pattern as embeddings)
   const excludeConnectionIds = new Set();
   let lastError = null;
@@ -100,7 +113,7 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language) {
 
     log.info("AUTH", `\x1b[32mUsing ${provider} account: ${credentials.connectionName}\x1b[0m`);
 
-    const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language, voice: body.voice, audioFormat: body.response_format, speed: body.speed });
+    const result = await handleTtsCore({ provider, model, input: body.input, credentials, responseFormat, language, voice: body.voice, audioFormat: body.response_format, speed: body.speed, knownModels });
 
     if (result.success) return result.response;
 
