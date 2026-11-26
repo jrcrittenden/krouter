@@ -176,13 +176,41 @@ function callerProvidedCredentials(request) {
   return false;
 }
 
-function lockedResponse(retryAfter) {
-  const res = NextResponse.json(
+// A browser hides the status and body of a cross-origin response that lacks this header,
+// so a bad key would surface as a CORS error instead of the 401 it is.
+const LLM_API_CORS_HEADERS = { "Access-Control-Allow-Origin": "*" };
+
+function lockedResponse(retryAfter, headers = {}) {
+  return NextResponse.json(
     { error: "Too many authentication attempts. Try again later.", retryAfter },
-    { status: 429 }
+    { status: 429, headers: { ...headers, "Retry-After": String(retryAfter) } }
   );
-  res.headers.set("Retry-After", String(retryAfter));
-  return res;
+}
+
+function isCorsPreflight(request) {
+  return request.method === "OPTIONS"
+    && request.headers.has("origin")
+    && request.headers.has("access-control-request-method");
+}
+
+// The /v1 routes export their own OPTIONS handlers, but this guard runs first and browsers
+// never attach credentials to a preflight, so a remote one could only ever get a 401.
+//
+// The requested headers are echoed rather than answered with "*" because the Fetch spec
+// excludes Authorization from that wildcard. Nothing is granted here: the request that
+// follows still needs an API key, and without Allow-Credentials no cookie is usable.
+function preflightResponse(request) {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      ...LLM_API_CORS_HEADERS,
+      "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+      "Access-Control-Allow-Headers":
+        request.headers.get("access-control-request-headers") || "Authorization, Content-Type, x-api-key",
+      "Access-Control-Max-Age": "600",
+      "Vary": "Access-Control-Request-Headers",
+    },
+  });
 }
 
 async function canAccessLocalOnlyRoute(request) {
@@ -267,6 +295,9 @@ export const __test__ = {
 
 export async function proxy(request) {
   const { pathname } = request.nextUrl;
+  const isLlmApi = isPublicLlmApi(pathname);
+
+  if (isLlmApi && isCorsPreflight(request)) return preflightResponse(request);
 
   // Rate-limit gate: any *remote* request that supplied credentials must clear
   // the per-IP lockout window before validation, so a brute-force attacker
@@ -279,7 +310,7 @@ export async function proxy(request) {
   const ip = limiterApplies ? getClientIp(request) : null;
   if (limiterApplies) {
     const lock = checkApiAuthLock(ip);
-    if (lock.locked) return lockedResponse(lock.retryAfter);
+    if (lock.locked) return lockedResponse(lock.retryAfter, isLlmApi ? LLM_API_CORS_HEADERS : {});
   }
   const noteAuthResult = (ok) => {
     if (!limiterApplies || !ip) return;
@@ -306,7 +337,7 @@ export async function proxy(request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  if (isPublicLlmApi(pathname)) {
+  if (isLlmApi) {
     if (await canAccessPublicLlmApi(request)) {
       noteAuthResult(true);
       return NextResponse.next();
@@ -314,7 +345,7 @@ export async function proxy(request) {
     noteAuthResult(false);
     return NextResponse.json({ error: process.env.REQUIRE_API_KEY === "true"
           ? "API key required (REQUIRE_API_KEY is enabled)"
-          : "API key required for remote API access" }, { status: 401 });
+          : "API key required for remote API access" }, { status: 401, headers: LLM_API_CORS_HEADERS });
   }
 
   // Deny-by-default for /api/* — public allow-list bypasses, everything else requires auth.
