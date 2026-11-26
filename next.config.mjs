@@ -12,6 +12,10 @@ const proxyClientMaxBodySize = process.env.NINEROUTER_PROXY_CLIENT_MAX_BODY_SIZE
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   distDir: process.env.NEXT_DIST_DIR || ".next",
+  // `next dev` rewrites a managed block into AGENTS.md whenever it detects a coding
+  // agent. AGENTS.md is maintained by hand instead, without Next's markers, so this
+  // setting has nothing of ours to remove.
+  agentRules: false,
   output: "standalone",
   // 0.5.122 (upstream c06cc084) — `open` must stay external. It derives its own
   // directory from import.meta.url; webpack would replace that with the BUILD
@@ -30,6 +34,14 @@ const nextConfig = {
   },
   env: {},
   experimental: {
+    // Next 16.4 defaults agentUpgrade to "security": `next build` and `next dev` then stop
+    // on an upgrade menu in a terminal, or halt once with instructions aimed at whatever
+    // coding agent is running them. In update.sh that menu discarded a finished build and
+    // left the daemon down. Upgrades here are a deliberate step, not a build-time prompt.
+    agentUpgrade: false,
+    // Already the default; pinned so a future Next release can't start writing agent
+    // feedback files into this tree on its own.
+    agentFeedback: false,
     // #1529/#1572: LLM clients can send long context or base64 image payloads through /v1 rewrites.
     proxyClientMaxBodySize,
     // 0.5.97 (from upstream 0270f6ea) — cache fetch across HMR refreshes.
